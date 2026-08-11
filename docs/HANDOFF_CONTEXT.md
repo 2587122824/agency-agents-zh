@@ -571,6 +571,7 @@ v2/runtime/worker.err.log
 - 提交 `404afb45` 已发布多问题复检并推送到 `main`。完整后端 `305 passed in 162.58s`、Python compileall、Vite build、差异检查通过。最终标准重启为 API `4612` / Worker `26180`，创建时间分别为 `2026-08-11 11:04:29.855 / 11:04:29.871`；健康 `ok`、Alembic runtime/head `20260730_42`、四份日志无错误。草稿最终 `row_version=248 / updated_at=2026-08-11T03:03:45.064469 / playhead_ms=0 / SH-001 source=0..409ms`，最终服务周期 editor-draft PUT 为 0。
 - 待复检已进入全时间线人工连续性投影：通过/普通未检查/待调整/待复检四类互斥，context 保留且 outcome 已重置的 check 只计待复检，不重复算未检查。全局下一项仍先按时间线选择边界；边界内需调整优先，其次按 context 顺序打开首个待复检原工具，最后普通未检查用并排。待复检定位不重写 context、不自动播放或写草稿。
 - 提交 `7786b8c6` 已发布全时间线待复检投影并推送到 `main`。真实 SH-002 → SH-001 验收中，subject+motion 编辑后全局与本切点均为 `未检查 1 · 待调整 0 · 待复检 2`；离开边界后全局下一项先恢复 subject 的并排，subject 通过后待复检降为 1，再恢复 motion 的同步动作且无扫描侧/B或播放残留，motion 通过后 context 清空并只剩普通未检查 1。全局卡 `218/218`、Inspector `244/244`、html/body `1280/1280`，页面日志为空；验收编辑已撤销，三项恢复未检查且播放头为 0。完整后端 `305 passed in 166.35s`、Python compileall、Vite build、差异检查通过。最终标准重启为 API `40752` / Worker `38208`，创建时间分别为 `2026-08-11 11:20:34.538 / 11:20:34.556`；健康 `ok`、Alembic runtime/head `20260730_42`、四份日志无错误。草稿最终 `row_version=251 / updated_at=2026-08-11T03:19:50.837760 / playhead_ms=0 / SH-001 source=0..409ms`，最终服务周期 editor-draft PUT 为 0。
+- 撤销/重做历史现原子保存时间线条目、人工连续性结果与多问题 context。修改把 needs-adjustment 清成 recheck 后，undo 必须恢复修改前条目及 needs-adjustment/handling，redo 再恢复修改后条目及 recheck；结构编辑清空的 context 也随被撤销的结构一起恢复。统一 commit 和四类直接写历史的拖动手势均使用同一快照，不改变草稿、API、迁移或跨重载边界。
 
 ## 9. 下一步
 

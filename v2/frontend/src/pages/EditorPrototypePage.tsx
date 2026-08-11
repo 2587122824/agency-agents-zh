@@ -74,6 +74,12 @@ interface BoundaryContinuityIssueContext {
   mode: BoundaryContinuityReviewMode
 }
 
+interface EditorHistorySnapshot {
+  items: TimelineItem[]
+  boundaryContinuityOutcomes: Record<string, Record<string, BoundaryContinuityCheckOutcome>>
+  boundaryContinuityIssueContexts: Record<string, BoundaryContinuityIssueContext[]>
+}
+
 interface BoundaryCandidateReviewSession {
   measuredMotionEvidence: Record<string, BoundaryMotionAnalysis>
   comparisonOutcomes: Record<string, BoundaryCandidateComparisonOutcome>
@@ -2842,8 +2848,8 @@ export function EditorPrototypePage() {
   const [assetSearchQuery, setAssetSearchQuery] = useState('')
   const [gapAssetSelection, setGapAssetSelection] = useState(false)
   const [notice, setNotice] = useState('剪辑调整会自动保存为项目草稿；生成可导出版本时才冻结新时间线。')
-  const [history, setHistory] = useState<TimelineItem[][]>([])
-  const [future, setFuture] = useState<TimelineItem[][]>([])
+  const [history, setHistory] = useState<EditorHistorySnapshot[]>([])
+  const [future, setFuture] = useState<EditorHistorySnapshot[]>([])
   const [timelineZoom, setTimelineZoom] = useState(82)
   const [snapEnabled, setSnapEnabled] = useState(true)
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null)
@@ -4109,12 +4115,18 @@ export function EditorPrototypePage() {
     }
   }
 
+  const historySnapshot = (snapshotItems: TimelineItem[]): EditorHistorySnapshot => ({
+    items: snapshotItems,
+    boundaryContinuityOutcomes,
+    boundaryContinuityIssueContexts,
+  })
+
   const commitItems = (nextItems: TimelineItem[], message: string, selectedId?: string | null) => {
     setPlaying(false)
     setBoundaryPreviewEndMs(null)
     setBoundaryPreviewLoop(null)
     setBoundaryReviewSession(null)
-    setHistory(rows => [...rows.slice(-49), items])
+    setHistory(rows => [...rows.slice(-49), historySnapshot(items)])
     setFuture([])
     setItems(nextItems)
     setDirty(true)
@@ -4153,12 +4165,14 @@ export function EditorPrototypePage() {
     setPendingBoundaryReview(null)
     const previous = history[history.length - 1]
     if (!previous) return
-    setFuture(rows => [items, ...rows].slice(0, 50))
+    setFuture(rows => [historySnapshot(items), ...rows].slice(0, 50))
     setHistory(rows => rows.slice(0, -1))
-    setItems(previous)
+    setItems(previous.items)
+    setBoundaryContinuityOutcomes(previous.boundaryContinuityOutcomes)
+    setBoundaryContinuityIssueContexts(previous.boundaryContinuityIssueContexts)
     setDirty(true)
-    setSelectedIndex(index => Math.min(index, Math.max(0, previous.length - 1)))
-    setNotice('已撤销上一步本地剪辑操作。')
+    setSelectedIndex(index => Math.min(index, Math.max(0, previous.items.length - 1)))
+    setNotice('已撤销上一步本地剪辑操作；相关人工连续性结果也已恢复。')
   }
 
   const redo = () => {
@@ -4172,12 +4186,14 @@ export function EditorPrototypePage() {
     setPendingBoundaryReview(null)
     const next = future[0]
     if (!next) return
-    setHistory(rows => [...rows.slice(-49), items])
+    setHistory(rows => [...rows.slice(-49), historySnapshot(items)])
     setFuture(rows => rows.slice(1))
-    setItems(next)
+    setItems(next.items)
+    setBoundaryContinuityOutcomes(next.boundaryContinuityOutcomes)
+    setBoundaryContinuityIssueContexts(next.boundaryContinuityIssueContexts)
     setDirty(true)
-    setSelectedIndex(index => Math.min(index, Math.max(0, next.length - 1)))
-    setNotice('已恢复下一步本地剪辑操作。')
+    setSelectedIndex(index => Math.min(index, Math.max(0, next.items.length - 1)))
+    setNotice('已恢复下一步本地剪辑操作；相关人工连续性结果也已随编辑重现。')
   }
 
   const blockMainTrackEdit = (item: TimelineItem | null = selectedItem) => {
@@ -4530,7 +4546,7 @@ export function EditorPrototypePage() {
         }
         return
       }
-      setHistory(rows => [...rows.slice(-49), originalItems])
+      setHistory(rows => [...rows.slice(-49), historySnapshot(originalItems)])
       setFuture([])
       setItems(latestItems)
       setDirty(true)
@@ -4721,7 +4737,7 @@ export function EditorPrototypePage() {
         if (conflictLabel) setNotice(`无法裁切：会与同类声音 ${conflictLabel} 重叠。`)
         return
       }
-      setHistory(rows => [...rows.slice(-49), originalItems])
+      setHistory(rows => [...rows.slice(-49), historySnapshot(originalItems)])
       setFuture([])
       setItems(latestItems)
       setDirty(true)
@@ -5072,7 +5088,7 @@ export function EditorPrototypePage() {
         setSelectedIndex(originalSelectedIndex)
         return
       }
-      setHistory(rows => [...rows.slice(-49), originalItems])
+      setHistory(rows => [...rows.slice(-49), historySnapshot(originalItems)])
       setFuture([])
       setItems(latest.nextItems)
       setDirty(true)
@@ -5539,7 +5555,7 @@ export function EditorPrototypePage() {
         setItems(originalItems)
         return
       }
-      setHistory(rows => [...rows.slice(-49), originalItems])
+      setHistory(rows => [...rows.slice(-49), historySnapshot(originalItems)])
       setFuture([])
       setDirty(true)
       setNotice(`已拖动${edge === 'start' ? '左' : '右'}边缘裁切片段，后续片段自动波纹对齐。`)

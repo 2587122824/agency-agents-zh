@@ -547,6 +547,10 @@ recheck 卡保留原问题标签和原观察工具，按钮复用只读处理入
 
 功能提交 `7786b8c6` 已推送。完整验证为后端 `305 passed in 166.35s`、compileall、Vite build 和 diff check。最终标准重启 API `40752` / Worker `38208`，创建时间 `2026-08-11 11:20:34.538 / 11:20:34.556`；健康 `ok`、Alembic runtime/head `20260730_42`、四份日志无错误。草稿 `row_version=251 / updated_at=2026-08-11T03:19:50.837760 / playhead_ms=0 / SH-002 0..4709ms / SH-001 0..409ms / gap 5118..15000ms`，最终服务周期 editor-draft PUT 为 0。
 
+### 连续性结果随剪辑撤销/重做
+
+历史元素改为 `EditorHistorySnapshot`，同时保存条目、人工结果 map 和多问题 context map。统一提交与四处直接写历史的指针手势全部捕获编辑前快照；撤销先保存编辑后完整快照再恢复三部分，重做反向执行。由此修改产生的 recheck 在 undo 后回到原 needs-adjustment/handling，redo 再回到 recheck，不会把已撤销的修改错误投影成仍待复检。候选审核记忆、播放状态和后端草稿合同不进入这次历史扩展。
+
 ## 8. 事件
 
 ```text
