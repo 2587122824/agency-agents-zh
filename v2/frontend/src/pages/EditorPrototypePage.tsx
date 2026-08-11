@@ -17,7 +17,7 @@ import { api } from '../api/client'
 import type { DeliveryAttempt, DeliveryWorkspace, EditorContinuityObservation, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from '../api/types'
 import styles from './EditorPrototypePage.module.css'
 
-const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v6'
+const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v7'
 
 interface LocalEditorDraft {
   schema_version: typeof LOCAL_DRAFT_SCHEMA
@@ -76,7 +76,7 @@ type BoundaryContinuityObservations = Record<
 >
 type BoundaryContinuityReadyEvidence = Record<
   string,
-  Partial<Record<'frames-left' | 'frames-right' | 'overlay' | 'action', true>>
+  Partial<Record<'frames-left' | 'frames-right' | 'overlay' | 'action-synchronous' | 'action-sequence', true>>
 >
 
 interface BoundaryContinuityIssueContext {
@@ -461,7 +461,7 @@ function continuityReviewModeForCheckId(checkId: string): BoundaryContinuityRevi
 }
 
 function continuityReviewModeLabel(mode: BoundaryContinuityReviewMode) {
-  if (mode === 'action') return '同步动作'
+  if (mode === 'action') return '同步动作与顺序切点'
   if (mode === 'overlay') return '叠加对齐'
   return '并排复核'
 }
@@ -726,6 +726,12 @@ function Waveform({ projectId, assetId }: { projectId: string; assetId: string }
   </span>
 }
 
+function boundaryFrameIsCurrent(video: HTMLVideoElement, sourceTimeMs: number) {
+  if (!Number.isFinite(video.duration)) return false
+  const expected = Math.min(Math.max(0, video.duration - .001), Math.max(0, sourceTimeMs / 1000))
+  return Math.abs(video.currentTime - expected) <= .02
+}
+
 function BoundaryFrameStill({
   projectId,
   item,
@@ -771,7 +777,7 @@ function BoundaryFrameStill({
       src={`/api/v1/projects/${projectId}/assets/${item.asset_id}/content`}
       onLoadedMetadata={seekFrame}
       onSeeked={event => {
-        if (!frameIsCurrent(event.currentTarget, sourceTimeMs)) return
+        if (!boundaryFrameIsCurrent(event.currentTarget, sourceTimeMs)) return
         setReady(true)
         onObserved(observationKey, observationSide)
       }}
@@ -869,7 +875,7 @@ function BoundaryFrameOverlay({
         src={`/api/v1/projects/${projectId}/assets/${left.asset_id}/content`}
         onLoadedMetadata={event => seekFrame(event.currentTarget, leftSourceTimeMs)}
         onSeeked={event => {
-          if (frameIsCurrent(event.currentTarget, leftSourceTimeMs)) setLeftReady(true)
+          if (boundaryFrameIsCurrent(event.currentTarget, leftSourceTimeMs)) setLeftReady(true)
         }}
       />
       <video
@@ -882,7 +888,7 @@ function BoundaryFrameOverlay({
         src={`/api/v1/projects/${projectId}/assets/${right.asset_id}/content`}
         onLoadedMetadata={event => seekFrame(event.currentTarget, rightSourceTimeMs)}
         onSeeked={event => {
-          if (frameIsCurrent(event.currentTarget, rightSourceTimeMs)) setRightReady(true)
+          if (boundaryFrameIsCurrent(event.currentTarget, rightSourceTimeMs)) setRightReady(true)
         }}
       />
     </div>
@@ -1550,7 +1556,7 @@ function BoundaryActionComparison({
   onRememberCandidateComparisonOutcome: (sessionKey: string, sourceKey: string, outcome: BoundaryCandidateComparisonOutcome) => void
   onNotice: (message: string) => void
   observationKey: string
-  onObserved: (observationKey: string, evidence: 'action') => void
+  onObserved: (observationKey: string, evidence: 'action-synchronous' | 'action-sequence') => void
 }) {
   const leftRef = useRef<HTMLVideoElement | null>(null)
   const rightRef = useRef<HTMLVideoElement | null>(null)
@@ -1956,7 +1962,7 @@ function BoundaryActionComparison({
       if (leftDone && rightDone) {
         setProgressMs(comparisonDurationMs)
         setComparisonPlaying(false)
-        if (!viewingTunedPhase) onObserved(observationKey, 'action')
+        if (!viewingTunedPhase) onObserved(observationKey, 'action-synchronous')
         onNotice(`${left.label} 与 ${right.label} 的${viewingTunedPhase ? '当前试调' : '原切点'}同步动作对比已完成；可重播或继续 A/B 对照。`)
         return
       }
@@ -2029,6 +2035,7 @@ function BoundaryActionComparison({
             onNotice(`${left.label} → ${right.label} 的 A→B 连续对照已完成；请选择保留 A 或采用 B。`)
             return
           }
+          if (!viewingTunedPhase) onObserved(observationKey, 'action-sequence')
           onNotice(`${left.label} → ${right.label} 的${viewingTunedPhase ? '当前试调' : '原切点'}顺序试播已完成；可切换 A/B 后重播。`)
           return
         }
@@ -2040,7 +2047,7 @@ function BoundaryActionComparison({
       if (sequenceAnimationRef.current != null) window.cancelAnimationFrame(sequenceAnimationRef.current)
       sequenceAnimationRef.current = null
     }
-  }, [activeLeftFadeMs, activePhaseCandidateSourceKey, activeRightFadeMs, cancelPhaseSequenceComparison, candidateReviewSessionKey, comparisonEvidenceReady, left.label, onNotice, onRememberCandidateComparisonOutcome, pauseSequenceMedia, phaseTrialSourceKey, rate, right.label, sequenceDurationMs, sequenceLeftDurationMs, sequenceLeftEndMs, sequenceLeftStartMs, sequencePlaying, sequenceRightEndMs, sequenceRightStartMs, viewingTunedPhase])
+  }, [activeLeftFadeMs, activePhaseCandidateSourceKey, activeRightFadeMs, cancelPhaseSequenceComparison, candidateReviewSessionKey, comparisonEvidenceReady, left.label, observationKey, onNotice, onObserved, onRememberCandidateComparisonOutcome, pauseSequenceMedia, phaseTrialSourceKey, rate, right.label, sequenceDurationMs, sequenceLeftDurationMs, sequenceLeftEndMs, sequenceLeftStartMs, sequencePlaying, sequenceRightEndMs, sequenceRightStartMs, viewingTunedPhase])
 
   useEffect(() => () => {
     leftRef.current?.pause()
@@ -2938,7 +2945,7 @@ export function EditorPrototypePage() {
   const [boundaryContinuityReadyEvidence, setBoundaryContinuityReadyEvidence] = useState<BoundaryContinuityReadyEvidence>({})
   const recordBoundaryContinuityReadyEvidence = useCallback((
     observationKey: string,
-    evidence: 'frames-left' | 'frames-right' | 'overlay' | 'action',
+    evidence: 'frames-left' | 'frames-right' | 'overlay' | 'action-synchronous' | 'action-sequence',
   ) => {
     setBoundaryContinuityReadyEvidence(current => current[observationKey]?.[evidence]
       ? current
@@ -6912,11 +6919,20 @@ export function EditorPrototypePage() {
                        const status: BoundaryContinuityCheckOutcome | 'unreviewed' = outcome ?? 'unreviewed'
                        const observationMode = continuityReviewModeForCheckId(check.id)
                        const currentObservation = boundaryContinuityObservations[boundaryKey]?.[observationMode]
+                       const requiredCompletedSteps = observationMode === 'frames'
+                         ? ['left_frame', 'right_frame'] as const
+                         : observationMode === 'overlay'
+                           ? ['overlay'] as const
+                           : ['synchronous_action', 'sequential_cut'] as const
                        const persistedObservationCurrent = currentObservation?.boundary_fingerprint === boundaryFingerprint
+                         && currentObservation.completed_steps.length === requiredCompletedSteps.length
+                         && currentObservation.completed_steps.every((step, index) => step === requiredCompletedSteps[index])
                        const readyEvidence = boundaryContinuityReadyEvidence[continuityObservationKey] ?? {}
                        const observationReady = observationMode === 'frames'
                          ? Boolean(readyEvidence['frames-left'] && readyEvidence['frames-right'])
-                         : Boolean(readyEvidence[observationMode])
+                         : observationMode === 'overlay'
+                           ? Boolean(readyEvidence.overlay)
+                           : Boolean(readyEvidence['action-synchronous'] && readyEvidence['action-sequence'])
                        const canPass = persistedObservationCurrent || observationReady
                        const setOutcome = (nextOutcome: BoundaryContinuityCheckOutcome | null) => {
                          if (nextOutcome === 'passed' && !canPass) {
@@ -6932,6 +6948,7 @@ export function EditorPrototypePage() {
                                [observationMode]: {
                                  boundary_fingerprint: boundaryFingerprint,
                                  observed_at: new Date().toISOString(),
+                                 completed_steps: [...requiredCompletedSteps],
                                },
                              },
                            }))

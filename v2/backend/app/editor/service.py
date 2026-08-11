@@ -470,6 +470,11 @@ def _freeze_continuity_review(
     outcomes_by_boundary = draft.continuity_outcomes or {}
     contexts_by_boundary = draft.continuity_issue_contexts or {}
     observations_by_boundary = draft.continuity_observations or {}
+    required_observation_steps = {
+        "frames": ["left_frame", "right_frame"],
+        "overlay": ["overlay"],
+        "action": ["synchronous_action", "sequential_cut"],
+    }
     boundaries = []
     unresolved = []
     for left, right in zip(main_items, main_items[1:]):
@@ -501,6 +506,7 @@ def _freeze_continuity_review(
                 isinstance(observation, dict)
                 and observation.get("boundary_fingerprint") == boundary_fingerprint
                 and observation.get("observed_at")
+                and observation.get("completed_steps") == required_observation_steps[observation_mode]
             )
             if outcome != "passed" or check_id in active_context_ids or not observation_matches:
                 unresolved.append({
@@ -520,6 +526,7 @@ def _freeze_continuity_review(
                     observation.get("boundary_fingerprint") if observation_matches else None
                 ),
                 "observed_at": observation.get("observed_at") if observation_matches else None,
+                "completed_steps": observation.get("completed_steps") if observation_matches else None,
             })
         boundaries.append({
             "boundary_key": boundary_key,
@@ -538,7 +545,7 @@ def _freeze_continuity_review(
             f"仍有 {len(unresolved)} 项镜头连续性检查未通过，不能生成可导出版本。",
         )
     return {
-        "schema_version": "timeline-continuity-review.v2",
+        "schema_version": "timeline-continuity-review.v3",
         "editor_draft_row_version": draft.row_version,
         "editor_draft_updated_at": draft.updated_at.isoformat(),
         "boundary_count": len(boundaries),

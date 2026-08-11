@@ -71,6 +71,9 @@ class EditorContinuityObservation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     boundary_fingerprint: str = Field(min_length=1, max_length=2048)
     observed_at: datetime
+    completed_steps: list[
+        Literal["left_frame", "right_frame", "overlay", "synchronous_action", "sequential_cut"]
+    ] = Field(min_length=1, max_length=2)
 
 
 class SaveEditorDraft(BaseModel):
@@ -91,7 +94,7 @@ class SaveEditorDraft(BaseModel):
 
 
 class EditorDraftRead(BaseModel):
-    schema_version: Literal["editor-draft-session.v3"] = "editor-draft-session.v3"
+    schema_version: Literal["editor-draft-session.v4"] = "editor-draft-session.v4"
     project_id: str
     snapshot_id: str
     base_timeline_id: str
