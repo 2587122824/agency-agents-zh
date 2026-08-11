@@ -3564,6 +3564,26 @@ export function EditorPrototypePage() {
       remainingGapMs: gapAfterExtensionMs - insertedDurationMs,
     }
   }, [selectedGapFormalRecommendation, selectedGapPrecedingExtension, selectedItem])
+  const selectedGapCompleteRepair = useMemo(() => {
+    if (!selectedGapCombinedRepair || selectedGapCombinedRepair.remainingGapMs < 200) return null
+    const formalShotCodes = new Set((workspace.data?.shot_sequence ?? []).map(shot => shot.shot_code))
+    const fillerCandidates = (workspace.data?.available_assets ?? [])
+      .filter(asset => (
+        asset.asset_type === 'video'
+        && asset.duration_ms != null
+        && asset.duration_ms >= selectedGapCombinedRepair.remainingGapMs
+        && asset.id !== selectedGapCombinedRepair.asset.id
+        && !usedMainVideoAssetIds.has(asset.id)
+        && (!asset.shot_code || !formalShotCodes.has(asset.shot_code))
+      ))
+      .sort((left, right) => left.id.localeCompare(right.id))
+    if (fillerCandidates.length !== 1) return null
+    return {
+      asset: fillerCandidates[0],
+      insertedDurationMs: selectedGapCombinedRepair.remainingGapMs,
+      trimmedDurationMs: (fillerCandidates[0].duration_ms ?? 0) - selectedGapCombinedRepair.remainingGapMs,
+    }
+  }, [selectedGapCombinedRepair, usedMainVideoAssetIds, workspace.data?.available_assets, workspace.data?.shot_sequence])
   const selectedGapDurationMs = selectedItem?.track_type === 'main_video' && !selectedItem.asset_id
     ? selectedItem.timeline_out_ms - selectedItem.timeline_in_ms
     : 0
@@ -5022,17 +5042,33 @@ export function EditorPrototypePage() {
     queueTrimBoundaryReview(item, 'end', items)
   }
 
-  const applySelectedGapCombinedRepair = () => {
+  const applySelectedGapCombinedRepair = (complete = false) => {
     if (
       !selectedItem
       || !selectedGapPrecedingExtension
       || !selectedGapFormalRecommendation
       || !selectedGapCombinedRepair
+      || (complete && !selectedGapCompleteRepair)
       || blockMainTrackEdit(selectedGapPrecedingExtension.item)
     ) return
     const { item, extensionMs } = selectedGapPrecedingExtension
     const { asset, insertedDurationMs, remainingGapMs } = selectedGapCombinedRepair
     const extendedSourceOutMs = (item.source_out_ms ?? 0) + extensionMs
+    const fillerItem: TimelineItem | null = complete && selectedGapCompleteRepair ? {
+      ...selectedItem,
+      id: `prototype-${selectedGapCompleteRepair.asset.id}-${Date.now()}`,
+      asset_id: selectedGapCompleteRepair.asset.id,
+      asset_state: selectedGapCompleteRepair.asset.state,
+      asset_type: selectedGapCompleteRepair.asset.asset_type,
+      asset_duration_ms: selectedGapCompleteRepair.asset.duration_ms,
+      label: selectedGapCompleteRepair.asset.node_key ?? selectedGapCompleteRepair.asset.role,
+      gap_reason: null,
+      source_in_ms: 0,
+      source_out_ms: selectedGapCompleteRepair.insertedDurationMs,
+      timeline_in_ms: 0,
+      timeline_out_ms: selectedGapCompleteRepair.insertedDurationMs,
+      transform: { fit: 'cover', transition_in: { type: 'cut', duration_ms: 0 }, transition_out: { type: 'cut', duration_ms: 0 } },
+    } : null
     const insertedItem: TimelineItem = {
       ...selectedItem,
       id: `prototype-${asset.id}-${Date.now()}`,
@@ -5057,7 +5093,8 @@ export function EditorPrototypePage() {
       if (row.id !== selectedItem.id) return [row]
       return [
         insertedItem,
-        ...(remainingGapMs > 0 ? [{
+        ...(fillerItem ? [fillerItem] : []),
+        ...(!fillerItem && remainingGapMs > 0 ? [{
           ...row,
           timeline_in_ms: 0,
           timeline_out_ms: remainingGapMs,
@@ -5087,8 +5124,10 @@ export function EditorPrototypePage() {
     resetStructuralPreviewState()
     commitItems(
       replaceMainTrack(items, reconciled.rows),
-      `已组合修复：${item.label} 延长 ${seconds(extensionMs)}、补入正式分镜 ${selectedGapFormalRecommendation.shot.shot_code} 并按正式顺序整理；剩余缺口 ${seconds(remainingGapMs)}，正在复检新切点。`,
-      insertedItem.id,
+      fillerItem && selectedGapCompleteRepair
+        ? `已一次完整修复：${item.label} 延长 ${seconds(extensionMs)}、补入正式分镜 ${selectedGapFormalRecommendation.shot.shot_code}、用 ${fillerItem.label} 覆盖剩余 ${seconds(selectedGapCompleteRepair.insertedDurationMs)} 并按正式顺序整理；画面缺口已补齐，正在复检全部新切点。`
+        : `已组合修复：${item.label} 延长 ${seconds(extensionMs)}、补入正式分镜 ${selectedGapFormalRecommendation.shot.shot_code} 并按正式顺序整理；剩余缺口 ${seconds(remainingGapMs)}，正在复检新切点。`,
+      fillerItem?.id ?? insertedItem.id,
     )
     setGapAssetSelection(false)
     setDraggedAssetId(null)
@@ -7850,9 +7889,16 @@ export function EditorPrototypePage() {
           </section>}
         </> : <section className={styles.gapActions}>
           <div className={styles.gapTitle}><AlertTriangle /><span><strong>缺少 {selectedItem ? seconds(selectedItem.timeline_out_ms - selectedItem.timeline_in_ms) : '0.9s'} 画面</strong><small>当前素材不足以覆盖 15 秒目标时长</small></span></div>
+          {selectedGapPrecedingExtension && selectedGapFormalRecommendation && selectedGapCombinedRepair && selectedGapCompleteRepair && <button
+            disabled={videoTrackLocked}
+            onClick={() => applySelectedGapCombinedRepair(true)}
+          ><WandSparkles /><span>
+            <strong>{videoTrackLocked ? '解锁后一次完整修复' : '一次完整修复正式顺序与时长'}</strong>
+            <small>延长 {selectedGapPrecedingExtension.item.label} {seconds(selectedGapPrecedingExtension.extensionMs)} + 补入 {selectedGapFormalRecommendation.shot.shot_code} {seconds(selectedGapCombinedRepair.insertedDurationMs)} + {selectedGapCompleteRepair.asset.node_key ?? selectedGapCompleteRepair.asset.role} 覆盖 {seconds(selectedGapCompleteRepair.insertedDurationMs)}{selectedGapCompleteRepair.trimmedDurationMs > 0 ? `（裁切 ${seconds(selectedGapCompleteRepair.trimmedDurationMs)}）` : ''}；补齐到 {seconds(durationMs)} 并试听全部新切点</small>
+          </span></button>}
           {selectedGapPrecedingExtension && selectedGapFormalRecommendation && selectedGapCombinedRepair && <button
             disabled={videoTrackLocked}
-            onClick={applySelectedGapCombinedRepair}
+            onClick={() => applySelectedGapCombinedRepair()}
           ><WandSparkles /><span>
             <strong>{videoTrackLocked ? '解锁后应用组合修复' : '组合修复正式顺序与缺口'}</strong>
             <small>延长 {selectedGapPrecedingExtension.item.label} {seconds(selectedGapPrecedingExtension.extensionMs)} + 补入 {selectedGapFormalRecommendation.shot.shot_code} {seconds(selectedGapCombinedRepair.insertedDurationMs)} + 正式排序；预计剩余 {seconds(selectedGapCombinedRepair.remainingGapMs)} 并自动试听新切点</small>
