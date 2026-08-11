@@ -3148,7 +3148,13 @@ export function EditorPrototypePage() {
       const passedCount = checks.filter(check => outcomes[check.id] === 'passed').length
       const needsAdjustmentChecks = checks.filter(check => outcomes[check.id] === 'needs_adjustment')
       const needsAdjustmentCount = needsAdjustmentChecks.length
-      const unreviewedCount = checks.length - passedCount - needsAdjustmentCount
+      const recheckContexts = (boundaryContinuityIssueContexts[boundary.key] ?? []).filter(context => (
+        checks.some(check => check.id === context.checkId)
+        && outcomes[context.checkId] !== 'needs_adjustment'
+        && outcomes[context.checkId] !== 'passed'
+      ))
+      const recheckCount = recheckContexts.length
+      const unreviewedCount = checks.length - passedCount - needsAdjustmentCount - recheckCount
       return [{
         ...boundary,
         index,
@@ -3156,11 +3162,13 @@ export function EditorPrototypePage() {
         requiredCount: checks.length,
         needsAdjustmentChecks,
         needsAdjustmentCount,
+        recheckContexts,
+        recheckCount,
         unreviewedCount,
-        unresolvedCount: needsAdjustmentCount + unreviewedCount,
+        unresolvedCount: needsAdjustmentCount + recheckCount + unreviewedCount,
       }]
     }),
-    [boundaryContinuityOutcomes, formalShotByCode, mainBoundaries, shotCodeByAssetId, shotSequenceByAssetId],
+    [boundaryContinuityIssueContexts, boundaryContinuityOutcomes, formalShotByCode, mainBoundaries, shotCodeByAssetId, shotSequenceByAssetId],
   )
   const unresolvedBoundaryContinuityReviews = boundaryContinuityReviewProgress.filter(boundary => boundary.unresolvedCount > 0)
   const passedBoundaryContinuityReviewCount = boundaryContinuityReviewProgress.length - unresolvedBoundaryContinuityReviews.length
@@ -3170,6 +3178,10 @@ export function EditorPrototypePage() {
   )
   const needsAdjustmentBoundaryContinuityCheckCount = boundaryContinuityReviewProgress.reduce(
     (total, boundary) => total + boundary.needsAdjustmentCount,
+    0,
+  )
+  const recheckBoundaryContinuityCheckCount = boundaryContinuityReviewProgress.reduce(
+    (total, boundary) => total + boundary.recheckCount,
     0,
   )
   const nextUnresolvedBoundaryContinuityReview = unresolvedBoundaryContinuityReviews.find(
@@ -3758,7 +3770,10 @@ export function EditorPrototypePage() {
   const focusIncompleteBoundaryContinuityReviewAt = (targetIndex: number) => {
     const review = boundaryContinuityReviewProgress.find(boundary => boundary.index === targetIndex)
     const firstAdjustment = review?.needsAdjustmentChecks[0]
-    const mode = firstAdjustment ? continuityReviewModeForCheckId(firstAdjustment.id) : 'frames'
+    const firstRecheck = review?.recheckContexts[0]
+    const mode = firstAdjustment
+      ? continuityReviewModeForCheckId(firstAdjustment.id)
+      : firstRecheck?.mode ?? 'frames'
     const target = focusBoundaryForReviewAt(targetIndex, mode)
     if (!target) return
     if (firstAdjustment) {
@@ -3774,7 +3789,9 @@ export function EditorPrototypePage() {
     }
     setNotice(firstAdjustment
       ? `已定位待调整项“${firstAdjustment.label}”：${target.left.label} → ${target.right.label}；已打开${continuityReviewModeLabel(mode)}。`
-      : `已定位人工连续性待处理项：${target.left.label} → ${target.right.label}；请逐项检查末帧与首帧。`)
+      : firstRecheck
+        ? `已定位待复检原问题“${firstRecheck.checkLabel}”：${target.left.label} → ${target.right.label}；已重新打开${continuityReviewModeLabel(mode)}。`
+        : `已定位人工连续性待处理项：${target.left.label} → ${target.right.label}；请逐项检查末帧与首帧。`)
   }
 
   const openBoundaryContinuityAdjustmentAt = (targetIndex: number, checkId: string, checkLabel: string) => {
@@ -6122,14 +6139,14 @@ export function EditorPrototypePage() {
               <span>
                 <strong>人工连续性 {passedBoundaryContinuityReviewCount}/{boundaryContinuityReviewProgress.length} 个切点通过</strong>
                 <small>{nextUnresolvedBoundaryContinuityReview
-                  ? `未检查 ${unreviewedBoundaryContinuityCheckCount} · 待调整 ${needsAdjustmentBoundaryContinuityCheckCount} · 按时间线顺序循环`
+                  ? `未检查 ${unreviewedBoundaryContinuityCheckCount} · 待调整 ${needsAdjustmentBoundaryContinuityCheckCount} · 待复检 ${recheckBoundaryContinuityCheckCount} · 按时间线顺序循环`
                   : '当前所有可播放切点均已逐项通过'}</small>
               </span>
               <button
                 type="button"
                 disabled={!nextUnresolvedBoundaryContinuityReview}
                 title={nextUnresolvedBoundaryContinuityReview
-                  ? '定位后展开末帧/首帧并排检查；不会改变播放头或写入草稿。'
+                  ? '定位后优先打开待调整或待复检原问题的观察工具；普通未检查项使用并排。不会改变播放头或写入草稿。'
                   : '当前所有可播放切点的人工连续性检查均已通过。'}
                 onClick={() => nextUnresolvedBoundaryContinuityReview
                   && focusIncompleteBoundaryContinuityReviewAt(nextUnresolvedBoundaryContinuityReview.index)}
@@ -6199,15 +6216,16 @@ export function EditorPrototypePage() {
                     .filter(check => currentContinuityOutcomes[check.id] === 'passed').length
                   const needsAdjustmentContinuityCheckCount = continuityChecks
                     .filter(check => currentContinuityOutcomes[check.id] === 'needs_adjustment').length
-                  const unreviewedContinuityCheckCount = continuityChecks.length
-                    - passedContinuityCheckCount
-                    - needsAdjustmentContinuityCheckCount
                   const continuityIssueContexts = (boundaryContinuityIssueContexts[boundaryKey] ?? [])
                     .filter(context => continuityChecks.some(check => check.id === context.checkId))
                   const handlingContinuityIssueCount = continuityIssueContexts.filter(
                     context => currentContinuityOutcomes[context.checkId] === 'needs_adjustment',
                   ).length
                   const recheckContinuityIssueCount = continuityIssueContexts.length - handlingContinuityIssueCount
+                  const unreviewedContinuityCheckCount = continuityChecks.length
+                    - passedContinuityCheckCount
+                    - needsAdjustmentContinuityCheckCount
+                    - recheckContinuityIssueCount
                  const sharedContinuityGroup = formalAdjacent
                    && leftFormalShot?.continuity_group_id
                    && leftFormalShot.continuity_group_id === rightFormalShot?.continuity_group_id
@@ -6701,7 +6719,7 @@ export function EditorPrototypePage() {
                          })}
                        </div>
                      </section>}
-                     <small>本切点：通过 {passedContinuityCheckCount} · 未检查 {unreviewedContinuityCheckCount} · 待调整 {needsAdjustmentContinuityCheckCount}。结果仅保留在本次页面，不写入草稿；“需调整”不会自动修改素材、切点或转场。</small>
+                     <small>本切点：通过 {passedContinuityCheckCount} · 未检查 {unreviewedContinuityCheckCount} · 待调整 {needsAdjustmentContinuityCheckCount} · 待复检 {recheckContinuityIssueCount}。结果仅保留在本次页面，不写入草稿；“需调整”不会自动修改素材、切点或转场。</small>
                    </div>
                  </div>
               })}

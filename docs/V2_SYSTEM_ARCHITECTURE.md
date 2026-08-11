@@ -333,6 +333,10 @@ render 对每个 context 独立读取当前 outcome，派生 handling/recheck �
 
 真实浏览器验证数组生命周期：subject+motion 两项 needs 由 motion 入口一次捕获，handling 为 2；源窗滑移使两项 outcome 同时缺失后，recheck 为 2。motion recheck 打开 action 且无扫描侧/B，passed 后数组只剩 subject；subject recheck 打开 frames，passed 后删除 boundary map 项。最终 DOM card/rows/buttons 为 `200/200`、`188/188`、`36/36`，无横向溢出。验收撤销后权威草稿为 `row_version=248 / playhead_ms=0 / SH-001 source=0..409ms`，最终服务周期 editor-draft PUT 为 0。
 
+`boundaryContinuityReviewProgress` 现同时读取 outcome map 与 context array。每个边界先按当前 checks 过滤 context，再把 outcome 不是 needs-adjustment/passed 的项投影为 `recheckContexts`；`unreviewedCount = required - passed - needsAdjustment - recheck`，四类互斥。`unresolvedCount` 为后三类之和。全局分别 reduce 未检查、待调整、待复检数，避免同一 check 双计数；useMemo 依赖显式包含两张 page-state map。
+
+全局 focus 在目标边界内依次选择 `needsAdjustmentChecks[0]`、`recheckContexts[0]`、frames fallback。needs 分支继续捕获当前全部问题；recheck 分支只读取已保存 mode 并给出原问题 notice，不重写 context。边界选择仍使用原 mainBoundaries index 循环，因此状态优先级只作用于同一边界，不形成跨时间线排序。
+
 只读 focus 改变选中片段时，主监看会因 React key 变化重新挂载 video；其 metadata 定位可能派发 `timeupdate`。`preservePlayheadOnReviewFocusRef` 只为这一次 selected item 变化保留 `advancingPlaybackRef=true`，使新媒体定位回调不能把源时点反写为播放头；标记随后一次性消费。用户主动播放会显式解除门禁，之后正常选择其他片段也会由既有 selected-item effect 恢复常规回调，不能把只读门禁扩散为永久忽略媒体时钟。
 
 修正后从 `playhead_ms=0` 重新加载真实页面并点击连续性待办，等待 1.4 秒后草稿的 row version、播放头与 updated_at 三项完全不变，重启后的 API 日志仍无 editor-draft PUT。DOM 同时证明 frames 已展开、并排模式 pressed、同步动作未挂载、所有媒体暂停；三项 checkbox 全部切换为 true 后只更新页面进度，后端草稿仍不变化。

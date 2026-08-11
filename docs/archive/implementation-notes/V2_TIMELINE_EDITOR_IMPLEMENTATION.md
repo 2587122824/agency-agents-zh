@@ -537,6 +537,12 @@ recheck 卡保留原问题标签和原观察工具，按钮复用只读处理入
 
 验收编辑已撤销，最终草稿 `row_version=248 / updated_at=2026-08-11T03:03:45.064469 / playhead_ms=0 / SH-002 0..4709ms / SH-001 0..409ms / gap 5118..15000ms`。最终标准重启为 API `4612` / Worker `26180`，创建时间分别为 `2026-08-11 11:04:29.855 / 11:04:29.871`；8766 监听 PID 精确等于 API，健康 `ok`，Alembic runtime/head `20260730_42`，四份日志无错误，最终服务周期 editor-draft PUT 为 0。
 
+### 全时间线待复检投影与导航
+
+进度派生把当前关系内、存在 context 且 outcome 已不是 needs/passed 的项定义为 recheck。unreviewed 明确减去 recheck，避免一项同时显示“未检查”和“待复检”；边界 unresolved 为 needs+recheck+plain-unreviewed。全局卡和单边界摘要都显示四类互斥数量。
+
+全局下一项仍按 boundary index 循环。目标边界内先取 needs，再取 context 数组首个 recheck，最后使用 frames 处理普通未检查；recheck 直接消费保存的 mode/label。该路径不调用 merge、不产生新 context、不改变 outcome，不新增 state、API 或保存副作用。
+
 ## 8. 事件
 
 ```text
