@@ -1282,7 +1282,7 @@ export interface Timeline {
   track_config: TimelineTrackConfig
   validation_report: Array<{ code: string; path: string; message: string; evidence: Record<string, unknown> }>
   continuity_review: {
-    schema_version?: 'timeline-continuity-review.v1'
+    schema_version?: 'timeline-continuity-review.v2'
     editor_draft_row_version?: number
     editor_draft_updated_at?: string
     boundary_count?: number
@@ -1295,7 +1295,14 @@ export interface Timeline {
       left_asset_id: string
       right_asset_id: string
       relation: 'same_moment' | 'time_jump' | 'location_change' | 'outfit_change' | 'general'
-      checks: Array<{ check_id: string; check_label: string; outcome: 'passed' }>
+      checks: Array<{
+        check_id: string
+        check_label: string
+        outcome: 'passed'
+        observation_mode: 'frames' | 'overlay' | 'action'
+        observation_boundary_fingerprint: string
+        observed_at: string
+      }>
     }>
   }
   continuity_review_hash: string | null
@@ -1385,8 +1392,13 @@ export interface EditorContinuityIssueContext {
   mode: 'frames' | 'overlay' | 'action'
 }
 
+export interface EditorContinuityObservation {
+  boundary_fingerprint: string
+  observed_at: string
+}
+
 export interface EditorDraft {
-  schema_version: 'editor-draft-session.v2'
+  schema_version: 'editor-draft-session.v3'
   project_id: string
   snapshot_id: string
   base_timeline_id: string
@@ -1396,6 +1408,7 @@ export interface EditorDraft {
   playhead_ms: number
   continuity_outcomes: Record<string, Record<string, EditorContinuityOutcome>>
   continuity_issue_contexts: Record<string, EditorContinuityIssueContext[]>
+  continuity_observations: Record<string, Partial<Record<'frames' | 'overlay' | 'action', EditorContinuityObservation>>>
   row_version: number
   updated_by: string
   updated_at: string

@@ -67,6 +67,12 @@ class EditorContinuityIssueContext(BaseModel):
     mode: Literal["frames", "overlay", "action"]
 
 
+class EditorContinuityObservation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    boundary_fingerprint: str = Field(min_length=1, max_length=2048)
+    observed_at: datetime
+
+
 class SaveEditorDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
     actor_id: str = Field(default="local-user", min_length=1, max_length=48)
@@ -78,10 +84,14 @@ class SaveEditorDraft(BaseModel):
     playhead_ms: int = Field(default=0, ge=0)
     continuity_outcomes: dict[str, dict[str, Literal["passed", "needs_adjustment"]]] = Field(max_length=500)
     continuity_issue_contexts: dict[str, list[EditorContinuityIssueContext]] = Field(max_length=500)
+    continuity_observations: dict[
+        str,
+        dict[Literal["frames", "overlay", "action"], EditorContinuityObservation],
+    ] = Field(max_length=500)
 
 
 class EditorDraftRead(BaseModel):
-    schema_version: Literal["editor-draft-session.v2"] = "editor-draft-session.v2"
+    schema_version: Literal["editor-draft-session.v3"] = "editor-draft-session.v3"
     project_id: str
     snapshot_id: str
     base_timeline_id: str
@@ -91,6 +101,10 @@ class EditorDraftRead(BaseModel):
     playhead_ms: int
     continuity_outcomes: dict[str, dict[str, Literal["passed", "needs_adjustment"]]]
     continuity_issue_contexts: dict[str, list[EditorContinuityIssueContext]]
+    continuity_observations: dict[
+        str,
+        dict[Literal["frames", "overlay", "action"], EditorContinuityObservation],
+    ]
     row_version: int
     updated_by: str
     updated_at: datetime

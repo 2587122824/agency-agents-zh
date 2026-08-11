@@ -14,10 +14,10 @@ import {
 import { Link, useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
-import type { DeliveryAttempt, DeliveryWorkspace, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from '../api/types'
+import type { DeliveryAttempt, DeliveryWorkspace, EditorContinuityObservation, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from '../api/types'
 import styles from './EditorPrototypePage.module.css'
 
-const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v5'
+const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v6'
 
 interface LocalEditorDraft {
   schema_version: typeof LOCAL_DRAFT_SCHEMA
@@ -29,6 +29,7 @@ interface LocalEditorDraft {
   playhead_ms: number
   boundary_continuity_outcomes: Record<string, Record<string, BoundaryContinuityCheckOutcome>>
   boundary_continuity_issue_contexts: Record<string, BoundaryContinuityIssueContext[]>
+  boundary_continuity_observations: BoundaryContinuityObservations
   saved_at: string
 }
 
@@ -69,6 +70,14 @@ interface BoundaryMotionAnalysis {
 
 type BoundaryCandidateComparisonOutcome = 'completed' | 'kept_baseline' | 'shortlisted'
 type BoundaryContinuityCheckOutcome = 'passed' | 'needs_adjustment'
+type BoundaryContinuityObservations = Record<
+  string,
+  Partial<Record<BoundaryContinuityReviewMode, EditorContinuityObservation>>
+>
+type BoundaryContinuityReadyEvidence = Record<
+  string,
+  Partial<Record<'frames-left' | 'frames-right' | 'overlay' | 'action', true>>
+>
 
 interface BoundaryContinuityIssueContext {
   checkId: string
@@ -257,6 +266,7 @@ function editorDraftFingerprint(
   timelineZoom: number,
   boundaryContinuityOutcomes: Record<string, Record<string, BoundaryContinuityCheckOutcome>>,
   boundaryContinuityIssueContexts: Record<string, BoundaryContinuityIssueContext[]>,
+  boundaryContinuityObservations: BoundaryContinuityObservations,
 ) {
   return JSON.stringify(canonicalDraftValue({
     base: sourceTimeline ? [sourceTimeline.id, sourceTimeline.row_version] : null,
@@ -278,6 +288,7 @@ function editorDraftFingerprint(
     pixels_per_second: timelineZoom,
     boundary_continuity_outcomes: boundaryContinuityOutcomes,
     boundary_continuity_issue_contexts: boundaryContinuityIssueContexts,
+    boundary_continuity_observations: boundaryContinuityObservations,
   }))
 }
 
@@ -468,8 +479,7 @@ function mergeBoundaryContinuityIssueContexts(
   return merged
 }
 
-function continuityBoundaryFingerprints(items: TimelineItem[]) {
-  const mainItems = items.filter(item => item.track_type === 'main_video')
+function continuityBoundaryFingerprint(left: TimelineItem, right: TimelineItem) {
   const itemFingerprint = (item: TimelineItem, side: 'left' | 'right') => {
     const transition = item.transform[side === 'left' ? 'transition_out' : 'transition_in'] as {
       type?: string
@@ -487,12 +497,17 @@ function continuityBoundaryFingerprints(items: TimelineItem[]) {
       transition?.duration_ms ?? 0,
     ]
   }
+  return JSON.stringify([
+    itemFingerprint(left, 'left'),
+    itemFingerprint(right, 'right'),
+  ])
+}
+
+function continuityBoundaryFingerprints(items: TimelineItem[]) {
+  const mainItems = items.filter(item => item.track_type === 'main_video')
   return new Map(mainItems.slice(0, -1).map((left, index) => {
     const right = mainItems[index + 1]
-    return [`${left.id}-${right.id}`, JSON.stringify([
-      itemFingerprint(left, 'left'),
-      itemFingerprint(right, 'right'),
-    ])]
+    return [`${left.id}-${right.id}`, continuityBoundaryFingerprint(left, right)]
   }))
 }
 
@@ -718,6 +733,9 @@ function BoundaryFrameStill({
   label,
   fps,
   onActivate,
+  observationKey,
+  observationSide,
+  onObserved,
 }: {
   projectId: string
   item: TimelineItem
@@ -725,6 +743,9 @@ function BoundaryFrameStill({
   label: string
   fps: number
   onActivate: () => void
+  observationKey: string
+  observationSide: 'frames-left' | 'frames-right'
+  onObserved: (observationKey: string, evidence: 'frames-left' | 'frames-right') => void
 }) {
   const frameRef = useRef<HTMLVideoElement | null>(null)
   const [ready, setReady] = useState(false)
@@ -749,7 +770,11 @@ function BoundaryFrameStill({
       preload="auto"
       src={`/api/v1/projects/${projectId}/assets/${item.asset_id}/content`}
       onLoadedMetadata={seekFrame}
-      onSeeked={() => setReady(true)}
+      onSeeked={event => {
+        if (!frameIsCurrent(event.currentTarget, sourceTimeMs)) return
+        setReady(true)
+        onObserved(observationKey, observationSide)
+      }}
     />
     <span><strong>{label}</strong><code>{timecode(sourceTimeMs, fps)}</code></span>
   </button>
@@ -767,6 +792,8 @@ function BoundaryFrameOverlay({
   blendPercent,
   onLeftActivate,
   onRightActivate,
+  observationKey,
+  onObserved,
 }: {
   projectId: string
   left: TimelineItem
@@ -779,6 +806,8 @@ function BoundaryFrameOverlay({
   blendPercent: number
   onLeftActivate: () => void
   onRightActivate: () => void
+  observationKey: string
+  onObserved: (observationKey: string, evidence: 'overlay') => void
 }) {
   const leftRef = useRef<HTMLVideoElement | null>(null)
   const rightRef = useRef<HTMLVideoElement | null>(null)
@@ -803,6 +832,7 @@ function BoundaryFrameOverlay({
 
   useEffect(() => {
     if (!leftReady || !rightReady || !leftRef.current || !rightRef.current) return
+    onObserved(observationKey, 'overlay')
     const leftVideo = leftRef.current
     const rightVideo = rightRef.current
     let cancelled = false
@@ -818,7 +848,7 @@ function BoundaryFrameOverlay({
       cancelled = true
       window.cancelAnimationFrame(frame)
     }
-  }, [leftReady, leftSourceTimeMs, rightReady, rightSourceTimeMs])
+  }, [leftReady, leftSourceTimeMs, observationKey, onObserved, rightReady, rightSourceTimeMs])
 
   const analysisLevelLabel = pixelAnalysis?.level === 'high'
     ? '变化较高'
@@ -838,7 +868,9 @@ function BoundaryFrameOverlay({
         preload="auto"
         src={`/api/v1/projects/${projectId}/assets/${left.asset_id}/content`}
         onLoadedMetadata={event => seekFrame(event.currentTarget, leftSourceTimeMs)}
-        onSeeked={() => setLeftReady(true)}
+        onSeeked={event => {
+          if (frameIsCurrent(event.currentTarget, leftSourceTimeMs)) setLeftReady(true)
+        }}
       />
       <video
         ref={rightRef}
@@ -849,7 +881,9 @@ function BoundaryFrameOverlay({
         style={{ opacity: rightReady ? blendPercent / 100 : .35 }}
         src={`/api/v1/projects/${projectId}/assets/${right.asset_id}/content`}
         onLoadedMetadata={event => seekFrame(event.currentTarget, rightSourceTimeMs)}
-        onSeeked={() => setRightReady(true)}
+        onSeeked={event => {
+          if (frameIsCurrent(event.currentTarget, rightSourceTimeMs)) setRightReady(true)
+        }}
       />
     </div>
     <div className={styles.boundaryOverlayFacts}>
@@ -1490,6 +1524,8 @@ function BoundaryActionComparison({
   onRememberCandidateMotionEvidence,
   onRememberCandidateComparisonOutcome,
   onNotice,
+  observationKey,
+  onObserved,
 }: {
   projectId: string
   left: TimelineItem
@@ -1513,6 +1549,8 @@ function BoundaryActionComparison({
   onRememberCandidateMotionEvidence: (sessionKey: string, sourceKey: string, analysis: BoundaryMotionAnalysis) => void
   onRememberCandidateComparisonOutcome: (sessionKey: string, sourceKey: string, outcome: BoundaryCandidateComparisonOutcome) => void
   onNotice: (message: string) => void
+  observationKey: string
+  onObserved: (observationKey: string, evidence: 'action') => void
 }) {
   const leftRef = useRef<HTMLVideoElement | null>(null)
   const rightRef = useRef<HTMLVideoElement | null>(null)
@@ -1918,6 +1956,7 @@ function BoundaryActionComparison({
       if (leftDone && rightDone) {
         setProgressMs(comparisonDurationMs)
         setComparisonPlaying(false)
+        if (!viewingTunedPhase) onObserved(observationKey, 'action')
         onNotice(`${left.label} 与 ${right.label} 的${viewingTunedPhase ? '当前试调' : '原切点'}同步动作对比已完成；可重播或继续 A/B 对照。`)
         return
       }
@@ -1928,7 +1967,7 @@ function BoundaryActionComparison({
       if (animationRef.current != null) window.cancelAnimationFrame(animationRef.current)
       animationRef.current = null
     }
-  }, [comparisonDurationMs, left.label, leftEndMs, leftStartMs, onNotice, playing, right.label, rightEndMs, rightStartMs, viewingTunedPhase])
+  }, [comparisonDurationMs, left.label, leftEndMs, leftStartMs, observationKey, onNotice, onObserved, playing, right.label, rightEndMs, rightStartMs, viewingTunedPhase])
 
   useEffect(() => {
     if (!sequencePlaying) return
@@ -2895,6 +2934,19 @@ export function EditorPrototypePage() {
   const [boundaryContinuityIssueContexts, setBoundaryContinuityIssueContexts] = useState<
     Record<string, BoundaryContinuityIssueContext[]>
   >({})
+  const [boundaryContinuityObservations, setBoundaryContinuityObservations] = useState<BoundaryContinuityObservations>({})
+  const [boundaryContinuityReadyEvidence, setBoundaryContinuityReadyEvidence] = useState<BoundaryContinuityReadyEvidence>({})
+  const recordBoundaryContinuityReadyEvidence = useCallback((
+    observationKey: string,
+    evidence: 'frames-left' | 'frames-right' | 'overlay' | 'action',
+  ) => {
+    setBoundaryContinuityReadyEvidence(current => current[observationKey]?.[evidence]
+      ? current
+      : {
+        ...current,
+        [observationKey]: { ...(current[observationKey] ?? {}), [evidence]: true },
+      })
+  }, [])
   const [monitorScale, setMonitorScale] = useState<'fit' | 'actual'>('fit')
   const [monitorFullscreen, setMonitorFullscreen] = useState(false)
   const [assetFilter, setAssetFilter] = useState<'all' | 'video' | 'audio' | 'subtitle'>('all')
@@ -2974,6 +3026,10 @@ export function EditorPrototypePage() {
     setBoundaryFrameBlendPercent(50)
     setBoundaryContinuityOutcomes({})
     setBoundaryContinuityIssueContexts({})
+    setBoundaryContinuityObservations({})
+    setBoundaryContinuityReadyEvidence({})
+    setBoundaryContinuityObservations({})
+    setBoundaryContinuityReadyEvidence({})
     setDirty(false)
     setLastValidation(null)
     setLastPreview(null)
@@ -3029,6 +3085,7 @@ export function EditorPrototypePage() {
     const remoteSnapEnabled = remote?.track_config.snap_enabled ?? sourceTimeline.track_config.snap_enabled
     const remotePlayheadMs = remote?.playhead_ms ?? 0
     const remoteContinuityOutcomes = remote?.continuity_outcomes ?? {}
+    const remoteContinuityObservations = remote?.continuity_observations ?? {}
     const remoteContinuityIssueContexts = Object.fromEntries(
       Object.entries(remote?.continuity_issue_contexts ?? {}).map(([key, contexts]) => [
         key,
@@ -3048,6 +3105,7 @@ export function EditorPrototypePage() {
         remoteZoom,
         remoteContinuityOutcomes,
         remoteContinuityIssueContexts,
+        remoteContinuityObservations,
       )
       : null
     const localFingerprint = localRestored
@@ -3059,6 +3117,7 @@ export function EditorPrototypePage() {
         localRestored.timeline_zoom,
         localRestored.boundary_continuity_outcomes,
         localRestored.boundary_continuity_issue_contexts,
+        localRestored.boundary_continuity_observations,
       )
       : null
     const localMatchesRemote = Boolean(remoteFingerprint && localFingerprint === remoteFingerprint)
@@ -3082,11 +3141,16 @@ export function EditorPrototypePage() {
     const restoredContinuityIssueContexts = useRemote
       ? remoteContinuityIssueContexts
       : localRestored?.boundary_continuity_issue_contexts ?? {}
+    const restoredContinuityObservations = useRemote
+      ? remoteContinuityObservations
+      : localRestored?.boundary_continuity_observations ?? {}
     setItems(restoredItems)
     setTimelineZoom(restoredZoom)
     setSnapEnabled(restoredSnapEnabled)
     setBoundaryContinuityOutcomes(restoredContinuityOutcomes)
     setBoundaryContinuityIssueContexts(restoredContinuityIssueContexts)
+    setBoundaryContinuityObservations(restoredContinuityObservations)
+    setBoundaryContinuityReadyEvidence({})
     setDirty(Boolean(remoteItems || localRestored))
     setLastAutoSavedAt(useRemote && remote ? remote.updated_at : null)
     setLastAutoSavedFingerprint(useRemote ? remoteFingerprint : null)
@@ -3285,6 +3349,10 @@ export function EditorPrototypePage() {
       const retained = Object.entries(current).filter(([key]) => currentBoundaryKeys.has(key))
       return retained.length === Object.keys(current).length ? current : Object.fromEntries(retained)
     })
+    setBoundaryContinuityObservations(current => {
+      const retained = Object.entries(current).filter(([key]) => currentBoundaryKeys.has(key))
+      return retained.length === Object.keys(current).length ? current : Object.fromEntries(retained)
+    })
   }, [mainBoundaries])
   const candidateReviewFollowUpBoundaries = useMemo(
     () => mainBoundaries.flatMap((boundary, index) => {
@@ -3364,8 +3432,9 @@ export function EditorPrototypePage() {
       timelineZoom,
       boundaryContinuityOutcomes,
       boundaryContinuityIssueContexts,
+      boundaryContinuityObservations,
     ),
-    [boundaryContinuityIssueContexts, boundaryContinuityOutcomes, items, playheadMs, snapEnabled, sourceTimeline, timelineZoom],
+    [boundaryContinuityIssueContexts, boundaryContinuityObservations, boundaryContinuityOutcomes, items, playheadMs, snapEnabled, sourceTimeline, timelineZoom],
   )
 
   useEffect(() => {
@@ -3375,6 +3444,7 @@ export function EditorPrototypePage() {
 
   useEffect(() => {
     setBoundaryActionComparisonKey(null)
+    setBoundaryContinuityReadyEvidence({})
   }, [items])
 
   useEffect(() => {
@@ -3507,10 +3577,11 @@ export function EditorPrototypePage() {
       playhead_ms: Math.max(0, Math.round(playheadMs)),
       boundary_continuity_outcomes: boundaryContinuityOutcomes,
       boundary_continuity_issue_contexts: boundaryContinuityIssueContexts,
+      boundary_continuity_observations: boundaryContinuityObservations,
       saved_at: new Date().toISOString(),
     }
     window.localStorage.setItem(localDraftKey, JSON.stringify(draft))
-  }, [boundaryContinuityIssueContexts, boundaryContinuityOutcomes, boundaryRollMonitor, dirty, items, localDraftKey, playheadMs, snapEnabled, sourceTimeline, timelineZoom])
+  }, [boundaryContinuityIssueContexts, boundaryContinuityObservations, boundaryContinuityOutcomes, boundaryRollMonitor, dirty, items, localDraftKey, playheadMs, snapEnabled, sourceTimeline, timelineZoom])
 
   const saveCurrentEditorDraft = async () => {
     if (!sourceTimeline) throw new Error('当前没有可保存的剪辑基线。')
@@ -3529,7 +3600,7 @@ export function EditorPrototypePage() {
           mode: context.mode,
         })),
       ]),
-    ))
+    ), boundaryContinuityObservations)
   }
 
   const autoSaveDraft = useMutation({
@@ -3774,6 +3845,8 @@ export function EditorPrototypePage() {
     setFuture([])
     setBoundaryContinuityOutcomes({})
     setBoundaryContinuityIssueContexts({})
+    setBoundaryContinuityObservations({})
+    setBoundaryContinuityReadyEvidence({})
     setDirty(false)
     setLastAutoSavedAt(null)
     setLastAutoSavedFingerprint(null)
@@ -4274,6 +4347,8 @@ export function EditorPrototypePage() {
     setPendingBoundaryReview(null)
     setBoundaryContinuityOutcomes({})
     setBoundaryContinuityIssueContexts({})
+    setBoundaryContinuityObservations({})
+    setBoundaryContinuityReadyEvidence({})
   }
 
   const undo = () => {
@@ -6415,6 +6490,8 @@ export function EditorPrototypePage() {
                  const overlayFrames = boundaryFrameOverlayKey === boundaryKey
                  const stripFrames = boundaryFrameStripKey === boundaryKey
                  const actionComparison = boundaryActionComparisonKey === boundaryKey
+                 const boundaryFingerprint = continuityBoundaryFingerprint(left, right)
+                 const continuityObservationKey = JSON.stringify([boundaryKey, boundaryFingerprint])
                  const candidateReviewSessionKey = boundaryCandidateReviewSessionKey(projectId, left, right, frameStepMs, outputFps)
                   const candidateReviewSession = boundaryCandidateReviewSessions[candidateReviewSessionKey]
                     ?? EMPTY_BOUNDARY_CANDIDATE_REVIEW_SESSION
@@ -6713,8 +6790,8 @@ export function EditorPrototypePage() {
                      {stripFrames
                        ? <div className={styles.boundaryFrameStrip} aria-label={`${left.label} 到 ${right.label} 的动作连续帧带`}>
                          {([
-                           { role: '前镜末端', item: left, frames: leftStripFrames, applyLabel: '设为前镜末帧', currentLabel: '当前末帧' },
-                           { role: '后镜开头', item: right, frames: rightStripFrames, applyLabel: '设为后镜首帧', currentLabel: '当前首帧' },
+                           { role: '前镜末端', item: left, frames: leftStripFrames, applyLabel: '设为前镜末帧', currentLabel: '当前末帧', observationSide: 'frames-left' },
+                           { role: '后镜开头', item: right, frames: rightStripFrames, applyLabel: '设为后镜首帧', currentLabel: '当前首帧', observationSide: 'frames-right' },
                          ] as const).map(row => <section key={`${boundaryKey}-${row.role}`}>
                            <header><strong>{row.role}</strong><span>{row.item.label}</span></header>
                            <div>{row.frames.map(frame => {
@@ -6731,6 +6808,9 @@ export function EditorPrototypePage() {
                                  label={`${row.item.label} ${frame.label}`}
                                  fps={outputFps}
                                  onActivate={() => seekTimeline(frame.timelineTimeMs)}
+                                 observationKey={continuityObservationKey}
+                                 observationSide={row.observationSide}
+                                 onObserved={recordBoundaryContinuityReadyEvidence}
                                />
                                <button
                                  aria-label={`${left.label} 到 ${right.label} ${frame.label} ${row.applyLabel}`}
@@ -6782,6 +6862,8 @@ export function EditorPrototypePage() {
                          onRememberCandidateMotionEvidence={rememberBoundaryCandidateMotionEvidence}
                          onRememberCandidateComparisonOutcome={rememberBoundaryCandidateComparisonOutcome}
                          onNotice={setNotice}
+                         observationKey={continuityObservationKey}
+                         onObserved={recordBoundaryContinuityReadyEvidence}
                        />
                        : overlayFrames
                        ? <BoundaryFrameOverlay
@@ -6796,6 +6878,8 @@ export function EditorPrototypePage() {
                          blendPercent={boundaryFrameBlendPercent}
                          onLeftActivate={() => seekTimeline(Math.max(left.timeline_in_ms, left.timeline_out_ms - frameStepMs))}
                          onRightActivate={() => seekTimeline(right.timeline_in_ms)}
+                         observationKey={continuityObservationKey}
+                         onObserved={recordBoundaryContinuityReadyEvidence}
                        />
                        : <div className={styles.boundaryFrames}>
                          <BoundaryFrameStill
@@ -6805,6 +6889,9 @@ export function EditorPrototypePage() {
                            label={`${left.label} 末帧`}
                            fps={outputFps}
                            onActivate={() => seekTimeline(Math.max(left.timeline_in_ms, left.timeline_out_ms - frameStepMs))}
+                           observationKey={continuityObservationKey}
+                           observationSide="frames-left"
+                           onObserved={recordBoundaryContinuityReadyEvidence}
                          />
                          <BoundaryFrameStill
                            projectId={projectId}
@@ -6813,6 +6900,9 @@ export function EditorPrototypePage() {
                            label={`${right.label} 首帧`}
                            fps={outputFps}
                            onActivate={() => seekTimeline(right.timeline_in_ms)}
+                           observationKey={continuityObservationKey}
+                           observationSide="frames-right"
+                           onObserved={recordBoundaryContinuityReadyEvidence}
                          />
                        </div>}
                    </>}
@@ -6820,8 +6910,32 @@ export function EditorPrototypePage() {
                      {continuityChecks.map(check => {
                        const outcome = currentContinuityOutcomes[check.id]
                        const status: BoundaryContinuityCheckOutcome | 'unreviewed' = outcome ?? 'unreviewed'
+                       const observationMode = continuityReviewModeForCheckId(check.id)
+                       const currentObservation = boundaryContinuityObservations[boundaryKey]?.[observationMode]
+                       const persistedObservationCurrent = currentObservation?.boundary_fingerprint === boundaryFingerprint
+                       const readyEvidence = boundaryContinuityReadyEvidence[continuityObservationKey] ?? {}
+                       const observationReady = observationMode === 'frames'
+                         ? Boolean(readyEvidence['frames-left'] && readyEvidence['frames-right'])
+                         : Boolean(readyEvidence[observationMode])
+                       const canPass = persistedObservationCurrent || observationReady
                        const setOutcome = (nextOutcome: BoundaryContinuityCheckOutcome | null) => {
+                         if (nextOutcome === 'passed' && !canPass) {
+                           setNotice(`请先完成${continuityReviewModeLabel(observationMode)}，再把“${check.label}”标为通过。`)
+                           return
+                         }
                          setDirty(true)
+                         if (nextOutcome === 'passed' && !persistedObservationCurrent) {
+                           setBoundaryContinuityObservations(current => ({
+                             ...current,
+                             [boundaryKey]: {
+                               ...(current[boundaryKey] ?? {}),
+                               [observationMode]: {
+                                 boundary_fingerprint: boundaryFingerprint,
+                                 observed_at: new Date().toISOString(),
+                               },
+                             },
+                           }))
+                         }
                          if (nextOutcome === 'passed' && continuityIssueContexts.some(context => context.checkId === check.id)) {
                            setBoundaryContinuityIssueContexts(current => {
                              const retained = (current[boundaryKey] ?? []).filter(context => context.checkId !== check.id)
@@ -6853,9 +6967,27 @@ export function EditorPrototypePage() {
                          </div>
                          <div className={styles.continuityOutcomeButtons} role="group" aria-label={`${check.label}的检查结果`}>
                            <button type="button" aria-pressed={!outcome} onClick={() => setOutcome(null)}>未检查</button>
-                           <button type="button" aria-pressed={status === 'passed'} onClick={() => setOutcome('passed')}>通过</button>
+                           <button
+                             type="button"
+                             aria-pressed={status === 'passed'}
+                             disabled={!canPass}
+                             title={canPass
+                               ? `已完成当前切点的${continuityReviewModeLabel(observationMode)}。`
+                               : `先完成当前切点的${continuityReviewModeLabel(observationMode)}，才能标为通过。`}
+                             onClick={() => setOutcome('passed')}
+                           >通过</button>
                            <button type="button" aria-pressed={status === 'needs_adjustment'} onClick={() => setOutcome('needs_adjustment')}>需调整</button>
                          </div>
+                         {status !== 'passed' && !canPass && <button
+                           type="button"
+                           className={styles.continuityObservationAction}
+                           disabled={boundaryIndex < 0 || !left.asset_id || !right.asset_id}
+                           title={`打开当前切点的${continuityReviewModeLabel(observationMode)}；观察完成前不能标为通过。`}
+                           onClick={() => {
+                             const target = focusBoundaryForReviewAt(boundaryIndex, observationMode)
+                             if (target) setNotice(`正在观察“${check.label}”：完成${continuityReviewModeLabel(observationMode)}后才可标为通过。`)
+                           }}
+                         >观察：{continuityReviewModeLabel(observationMode)}</button>}
                          {status === 'needs_adjustment' && <button
                            type="button"
                            className={styles.continuityAdjustmentAction}

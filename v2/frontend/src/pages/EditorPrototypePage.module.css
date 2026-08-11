@@ -1974,6 +1974,20 @@
   background: #493027;
   color: #ffd3bf;
 }
+.boundaryControl .continuityObservationAction {
+  width: 100%;
+  height: 25px;
+  border-color: #53675f;
+  border-style: dashed;
+  background: #1d2925;
+  color: #9fc7b6;
+  font-size: 8px;
+}
+.boundaryControl .continuityObservationAction:hover:not(:disabled) {
+  border-color: #6e8d80;
+  background: #263730;
+  color: #cce7dc;
+}
 .continuityIssueContext {
   min-width: 0;
   padding: 6px;

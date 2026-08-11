@@ -102,6 +102,38 @@ _GENERAL_CONTINUITY_CHECKS = [
 ]
 
 
+def _continuity_review_mode(check_id: str) -> str:
+    if check_id == "motion":
+        return "action"
+    if check_id in {"eyeline", "orientation"}:
+        return "overlay"
+    return "frames"
+
+
+def _continuity_boundary_fingerprint(left: dict, right: dict) -> str:
+    def item_fingerprint(item: dict, side: str) -> list:
+        transform = item.get("transform") if isinstance(item.get("transform"), dict) else {}
+        transition_key = "transition_out" if side == "left" else "transition_in"
+        transition = transform.get(transition_key) if isinstance(transform.get(transition_key), dict) else {}
+        return [
+            item.get("client_item_id"),
+            item.get("asset_id"),
+            item.get("source_in_ms"),
+            item.get("source_out_ms"),
+            item.get("timeline_in_ms"),
+            item.get("timeline_out_ms"),
+            transform.get("fit"),
+            transition.get("type", "cut"),
+            transition.get("duration_ms", 0),
+        ]
+
+    return json.dumps(
+        [item_fingerprint(left, "left"), item_fingerprint(right, "right")],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
 def _editor(session: Session) -> EditorRepository:
     return SqlAlchemyEditorRepository(session)
 
@@ -122,6 +154,7 @@ def _editor_draft_read(draft: EditorDraftSession) -> dict:
         "playhead_ms": draft.playhead_ms,
         "continuity_outcomes": draft.continuity_outcomes,
         "continuity_issue_contexts": draft.continuity_issue_contexts,
+        "continuity_observations": draft.continuity_observations,
         "row_version": draft.row_version,
         "updated_by": draft.updated_by,
         "updated_at": draft.updated_at,
@@ -167,6 +200,13 @@ def save_editor_draft(session: Session, project: Project, payload: SaveEditorDra
                 key: [context.model_dump() for context in contexts]
                 for key, contexts in payload.continuity_issue_contexts.items()
             },
+            continuity_observations={
+                key: {
+                    mode: observation.model_dump(mode="json")
+                    for mode, observation in observations.items()
+                }
+                for key, observations in payload.continuity_observations.items()
+            },
             updated_by=payload.actor_id,
             updated_at=now,
         )
@@ -182,6 +222,13 @@ def save_editor_draft(session: Session, project: Project, payload: SaveEditorDra
         draft.continuity_issue_contexts = {
             key: [context.model_dump() for context in contexts]
             for key, contexts in payload.continuity_issue_contexts.items()
+        }
+        draft.continuity_observations = {
+            key: {
+                mode: observation.model_dump(mode="json")
+                for mode, observation in observations.items()
+            }
+            for key, observations in payload.continuity_observations.items()
         }
         draft.row_version += 1
         draft.updated_by = payload.actor_id
@@ -422,6 +469,7 @@ def _freeze_continuity_review(
     )
     outcomes_by_boundary = draft.continuity_outcomes or {}
     contexts_by_boundary = draft.continuity_issue_contexts or {}
+    observations_by_boundary = draft.continuity_observations or {}
     boundaries = []
     unresolved = []
     for left, right in zip(main_items, main_items[1:]):
@@ -437,7 +485,9 @@ def _freeze_continuity_review(
         relation = right_shot.continuity_relation if formal_adjacent else "general"
         checks = _CONTINUITY_CHECKS.get(relation, _GENERAL_CONTINUITY_CHECKS)
         boundary_key = f'{left["client_item_id"]}-{right["client_item_id"]}'
+        boundary_fingerprint = _continuity_boundary_fingerprint(left, right)
         outcomes = outcomes_by_boundary.get(boundary_key, {})
+        observations = observations_by_boundary.get(boundary_key, {})
         active_context_ids = {
             context.get("check_id")
             for context in contexts_by_boundary.get(boundary_key, [])
@@ -445,17 +495,31 @@ def _freeze_continuity_review(
         frozen_checks = []
         for check_id, check_label in checks:
             outcome = outcomes.get(check_id)
-            if outcome != "passed" or check_id in active_context_ids:
+            observation_mode = _continuity_review_mode(check_id)
+            observation = observations.get(observation_mode) if isinstance(observations, dict) else None
+            observation_matches = bool(
+                isinstance(observation, dict)
+                and observation.get("boundary_fingerprint") == boundary_fingerprint
+                and observation.get("observed_at")
+            )
+            if outcome != "passed" or check_id in active_context_ids or not observation_matches:
                 unresolved.append({
                     "boundary_key": boundary_key,
                     "check_id": check_id,
                     "outcome": outcome or "unreviewed",
                     "recheck": check_id in active_context_ids,
+                    "observation_mode": observation_mode,
+                    "observation_current": observation_matches,
                 })
             frozen_checks.append({
                 "check_id": check_id,
                 "check_label": check_label,
                 "outcome": outcome or "unreviewed",
+                "observation_mode": observation_mode,
+                "observation_boundary_fingerprint": (
+                    observation.get("boundary_fingerprint") if observation_matches else None
+                ),
+                "observed_at": observation.get("observed_at") if observation_matches else None,
             })
         boundaries.append({
             "boundary_key": boundary_key,
@@ -474,7 +538,7 @@ def _freeze_continuity_review(
             f"仍有 {len(unresolved)} 项镜头连续性检查未通过，不能生成可导出版本。",
         )
     return {
-        "schema_version": "timeline-continuity-review.v1",
+        "schema_version": "timeline-continuity-review.v2",
         "editor_draft_row_version": draft.row_version,
         "editor_draft_updated_at": draft.updated_at.isoformat(),
         "boundary_count": len(boundaries),

@@ -6618,6 +6618,33 @@ def save_fully_reviewed_editor_draft(
         for left, right in zip(main_items, main_items[1:])
         if left.get("asset_id") and right.get("asset_id")
     }
+    def boundary_fingerprint(left: dict, right: dict) -> str:
+        def item_fingerprint(item: dict, side: str) -> list:
+            transform = item.get("transform") or {}
+            transition = transform.get("transition_out" if side == "left" else "transition_in") or {}
+            return [
+                item.get("client_item_id"), item.get("asset_id"),
+                item.get("source_in_ms"), item.get("source_out_ms"),
+                item.get("timeline_in_ms"), item.get("timeline_out_ms"),
+                transform.get("fit"), transition.get("type", "cut"),
+                transition.get("duration_ms", 0),
+            ]
+        return json.dumps(
+            [item_fingerprint(left, "left"), item_fingerprint(right, "right")],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+    observations = {
+        f"{left['client_item_id']}-{right['client_item_id']}": {
+            mode: {
+                "boundary_fingerprint": boundary_fingerprint(left, right),
+                "observed_at": "2026-08-11T06:00:00Z",
+            }
+            for mode in ("frames", "overlay", "action")
+        }
+        for left, right in zip(main_items, main_items[1:])
+        if left.get("asset_id") and right.get("asset_id")
+    }
     response = client.put(
         f"/api/v1/projects/{project['id']}/editor-draft",
         json={
@@ -6630,6 +6657,7 @@ def save_fully_reviewed_editor_draft(
             "playhead_ms": 0,
             "continuity_outcomes": outcomes,
             "continuity_issue_contexts": {},
+            "continuity_observations": observations,
         },
     )
     assert response.status_code == 200
@@ -7968,10 +7996,35 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
                     "mode": "action",
                 }],
             },
+            "continuity_observations": {
+                first_boundary_key: {
+                    "frames": {
+                        "boundary_fingerprint": json.dumps([
+                            [
+                                draft_items[0]["client_item_id"], draft_items[0]["asset_id"],
+                                draft_items[0]["source_in_ms"], draft_items[0]["source_out_ms"],
+                                draft_items[0]["timeline_in_ms"], draft_items[0]["timeline_out_ms"],
+                                draft_items[0]["transform"].get("fit"),
+                                (draft_items[0]["transform"].get("transition_out") or {}).get("type", "cut"),
+                                (draft_items[0]["transform"].get("transition_out") or {}).get("duration_ms", 0),
+                            ],
+                            [
+                                draft_items[1]["client_item_id"], draft_items[1]["asset_id"],
+                                draft_items[1]["source_in_ms"], draft_items[1]["source_out_ms"],
+                                draft_items[1]["timeline_in_ms"], draft_items[1]["timeline_out_ms"],
+                                draft_items[1]["transform"].get("fit"),
+                                (draft_items[1]["transform"].get("transition_in") or {}).get("type", "cut"),
+                                (draft_items[1]["transform"].get("transition_in") or {}).get("duration_ms", 0),
+                            ],
+                        ], ensure_ascii=False, separators=(",", ":")),
+                        "observed_at": "2026-08-11T06:00:00Z",
+                    },
+                },
+            },
         },
     )
     assert saved_draft.status_code == 200
-    assert saved_draft.json()["schema_version"] == "editor-draft-session.v2"
+    assert saved_draft.json()["schema_version"] == "editor-draft-session.v3"
     assert saved_draft.json()["playhead_ms"] == 12_000
     assert saved_draft.json()["continuity_outcomes"] == {
         first_boundary_key: {"motion": "needs_adjustment", "subject": "passed"},
@@ -8007,6 +8060,43 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
     reviewed_draft = save_fully_reviewed_editor_draft(
         client, project, exported, exported["track_config"], stripped_draft_items,
     )
+    stale_observations = json.loads(json.dumps(reviewed_draft["continuity_observations"]))
+    reviewed_first_boundary_key = next(iter(stale_observations))
+    stale_observations[reviewed_first_boundary_key]["frames"]["boundary_fingerprint"] = "stale-boundary"
+    stale_draft = client.put(
+        f"/api/v1/projects/{project['id']}/editor-draft",
+        json={
+            "actor_id": "test-user",
+            "expected_snapshot_id": snapshot["id"],
+            "base_timeline_id": exported["id"],
+            "base_timeline_row_version": exported["row_version"],
+            "track_config": exported["track_config"],
+            "items": reviewed_draft["items"],
+            "playhead_ms": 0,
+            "continuity_outcomes": reviewed_draft["continuity_outcomes"],
+            "continuity_issue_contexts": {},
+            "continuity_observations": stale_observations,
+        },
+    )
+    assert stale_draft.status_code == 200
+    stale_revision = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{exported['id']}:revise",
+        json={
+            "command_id": "post-delivery-revision-stale-observation",
+            "actor_id": "test-user",
+            "expected_snapshot_id": snapshot["id"],
+            "expected_row_version": exported["row_version"],
+            "expected_editor_draft_row_version": stale_draft.json()["row_version"],
+            "source": "user",
+            "track_config": exported["track_config"],
+            "items": stripped_draft_items,
+        },
+    )
+    assert stale_revision.status_code == 409
+    assert stale_revision.headers["x-error-code"] == "TIMELINE_CONTINUITY_REVIEW_INCOMPLETE"
+    reviewed_draft = save_fully_reviewed_editor_draft(
+        client, project, exported, exported["track_config"], stripped_draft_items,
+    )
     revised = client.post(
         f"/api/v1/projects/{project['id']}/timelines/{exported['id']}:revise",
         json={
@@ -8023,7 +8113,7 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
     assert revised.status_code == 201
     assert revised.json()["status"] == "candidate"
     assert revised.json()["supersedes_timeline_id"] == exported["id"]
-    assert revised.json()["continuity_review"]["schema_version"] == "timeline-continuity-review.v1"
+    assert revised.json()["continuity_review"]["schema_version"] == "timeline-continuity-review.v2"
     assert revised.json()["continuity_review"]["boundary_count"] == 2
     assert revised.json()["continuity_review_hash"]
     assert revised.json()["continuity_review_hash"] == hashlib.sha256(
@@ -8036,6 +8126,11 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
     ).hexdigest()
     assert all(
         check["outcome"] == "passed"
+        for boundary in revised.json()["continuity_review"]["boundaries"]
+        for check in boundary["checks"]
+    )
+    assert all(
+        check["observation_boundary_fingerprint"] and check["observed_at"]
         for boundary in revised.json()["continuity_review"]["boundaries"]
         for check in boundary["checks"]
     )

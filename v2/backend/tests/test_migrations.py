@@ -129,6 +129,9 @@ def test_planning_authority_backfill_uses_persisted_candidate_status(tmp_path: P
         "correlation_id", "actor_type", "actor_id", "schema_version",
     }.issubset({column["name"] for column in inspect(upgraded_engine).get_columns("project_events")})
     assert "outbox_messages" in inspect(upgraded_engine).get_table_names()
+    assert "continuity_observations" in {
+        column["name"] for column in inspect(upgraded_engine).get_columns("editor_draft_sessions")
+    }
     assert {
         "product_entity_version_ids",
         "primary_reference_entity_version_id",
