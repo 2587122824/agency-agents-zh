@@ -523,6 +523,10 @@ A/B 决策门禁已从“候选快捷操作等待像素”收紧为统一的当�
 
 recheck 卡保留原问题标签和原观察工具，按钮复用只读处理入口。相同 check 明确 passed 时同时删除 context；未检查或仍需调整继续保留。workspace 加载与 discard 清空 map，`mainBoundaries` 变化 effect 裁剪已消失 key；关系清单不含 check ID 时 render 过滤。卡片采用可收缩文本列和固定 52px 复检按钮，不扩大 Inspector。状态不写草稿、history、API、localStorage、迁移或 FFmpeg。
 
+提交 `1cd266c3` 已发布调整后原问题复检上下文并推送到 `main`。最终完整后端 `305 passed in 288.89s`、Python compileall、Vite 生产构建与 `git diff --check` 通过，Vite 仅有既有大 chunk 警告。真实 motion 问题经同步动作入口后，把 SH-001 源窗实际后移一帧至 `42..451ms`；原 outcome 清空而 context 变为 recheck，重新复检仍打开 action、无扫描侧/B、13 路媒体暂停。passed 后 context 消失。卡片/按钮/Inspector/html/body 分别为 `200/200`、`50/50`、`244/244`、`1280/1280`，页面 warning/error 为空。
+
+验收编辑与播放头已通过界面撤销/归零，权威草稿最终为 `row_version=245 / updated_at=2026-08-11T02:51:08.331065 / playhead_ms=0 / SH-002 0..4709ms / SH-001 0..409ms / gap 5118..15000ms`。最终标准重启为 API PID `35608` / Worker PID `13960`，创建时间分别为 `2026-08-11 10:51:59.268 / 10:51:59.287`；8766 监听 PID 精确等于 API，健康 `ok`，Alembic runtime/head `20260730_42`。四份日志无错误，最终服务周期 editor-draft PUT 为 0。
+
 ## 8. 事件
 
 ```text

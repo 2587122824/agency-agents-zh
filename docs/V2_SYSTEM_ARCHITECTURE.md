@@ -325,6 +325,8 @@ unresolved 队列保持 boundary index 顺序并循环选择下一个；定位�
 
 一个同步 effect 只按当前 `mainBoundaries` key 集合裁剪 context map；保留数量不变时返回原对象，避免无意义 render。关系清单过滤在 render 时验证 check ID，旧关系问题没有显示路径。workspace reset 与 discard 同时清空 outcome/context 两张 map。recheck 入口复用 `openBoundaryContinuityAdjustmentAt` 与原 mode，不恢复扫描侧、B、pending 或播放。该机制不进入草稿指纹、撤销栈、API、迁移、FFmpeg 或旧数据兼容。
 
+浏览器通过真实 `slipBoundaryItem` 事务验证派生阶段：处理 motion 时 context/outcome 为 handling/needs-adjustment；源窗 `0..409 → 42..451ms` 后既有 invalidation 删除 outcome，但 boundary key 未变，context 自动成为 recheck。重新打开 action 不改播放头 `5118ms`，不恢复扫描侧或 B；passed 事件同一批删除 context 并写入 outcome。验收界面撤销后源窗回到 `0..409ms`，最终草稿 `row_version=245 / playhead_ms=0`。最终服务周期只有健康与草稿 GET，editor-draft PUT 为 0。
+
 只读 focus 改变选中片段时，主监看会因 React key 变化重新挂载 video；其 metadata 定位可能派发 `timeupdate`。`preservePlayheadOnReviewFocusRef` 只为这一次 selected item 变化保留 `advancingPlaybackRef=true`，使新媒体定位回调不能把源时点反写为播放头；标记随后一次性消费。用户主动播放会显式解除门禁，之后正常选择其他片段也会由既有 selected-item effect 恢复常规回调，不能把只读门禁扩散为永久忽略媒体时钟。
 
 修正后从 `playhead_ms=0` 重新加载真实页面并点击连续性待办，等待 1.4 秒后草稿的 row version、播放头与 updated_at 三项完全不变，重启后的 API 日志仍无 editor-draft PUT。DOM 同时证明 frames 已展开、并排模式 pressed、同步动作未挂载、所有媒体暂停；三项 checkbox 全部切换为 true 后只更新页面进度，后端草稿仍不变化。

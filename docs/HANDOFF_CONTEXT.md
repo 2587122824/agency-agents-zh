@@ -564,6 +564,8 @@ v2/runtime/worker.err.log
 - 问题处理真实验收：主体需调整的单项入口进入并排；动作需调整后，全局下一待处理进入同步动作，扫描侧 pressed 为 0、没有 B、13 路媒体暂停、播放头为 0。缺口边界处理入口 disabled 并提示补齐双方画面。固定图标槽修复后 checklist、三行、三态组、处理按钮分别为 `202/202`、`200/200`、`188/188`、`186/186`，Inspector、html/body 为 `244/244`、`1280/1280`，页面 warning/error 为空。
 - 提交 `eda5b3f9` 发布需调整到观察工具路由，`44d88863` / `5f2cb7a6` 完成长中文行溢出的两阶段定位与最终修复，均已推送到 `main`。最终完整后端 `305 passed in 163.40s`、Python compileall、Vite build 和差异检查通过。最终标准重启为 API `32424` / Worker `19084`，创建时间分别为 `2026-08-11 10:34:33.693 / 10:34:33.713`；健康 `ok`，Alembic runtime/head `20260730_42`，四份日志无错误。草稿恢复为 SH-002 → SH-001 → 缺口、`row_version=242 / playhead_ms=0`，最终服务周期 editor-draft PUT 为 0。
 - 连续性处理现保留“原问题 → 修改 → 复检”页面上下文：单项或全局 needs-adjustment 处理记录 boundary key、check ID/标签和原观察模式；真实编辑清掉 outcome 后，同一边界不再忘记原问题，而显示“待复检原问题”和“重新复检”。只有用户重新明确通过才关闭；未检查或仍需调整继续保留。普通未检查定位不创建 context，已删除/重排掉的 boundary key 自动裁剪，关系变化不显示旧 check，项目加载/丢弃清空。上下文不写草稿、API、history、localStorage、迁移或 FFmpeg。
+- 原问题复检真实验收：motion 需调整进入同步动作后，SH-001 源窗实际后移一帧 `0..409 → 42..451ms`；检查按既有规则回到未检查，但上下文准确显示“待复检原问题”和原动作标签。重新复检仍只打开同步动作，扫描侧为空、无 B、13 路媒体暂停、播放头保持自动试听终点 `5118ms`；明确通过后 context 消失。卡片/按钮/Inspector/html/body 为 `200/200`、`50/50`、`244/244`、`1280/1280`，页面 warning/error 为空。验收后界面撤销并归零，源窗恢复 `0..409ms`。
+- 提交 `1cd266c3` 已发布原问题跨修改复检并推送到 `main`。完整后端 `305 passed in 288.89s`、Python compileall、Vite build、差异检查通过。最终标准重启为 API `35608` / Worker `13960`，创建时间分别为 `2026-08-11 10:51:59.268 / 10:51:59.287`；健康 `ok`，Alembic runtime/head `20260730_42`，四份日志无错误。草稿最终 `row_version=245 / updated_at=2026-08-11T02:51:08.331065 / playhead_ms=0 / SH-001 source=0..409ms`，最终服务周期 editor-draft PUT 为 0。
 
 ## 9. 下一步
 
