@@ -6875,7 +6875,7 @@ export function EditorPrototypePage() {
                          })}
                        </div>
                      </section>}
-                     <small>本切点：通过 {passedContinuityCheckCount} · 未检查 {unreviewedContinuityCheckCount} · 待调整 {needsAdjustmentContinuityCheckCount} · 待复检 {recheckContinuityIssueCount}。结果仅保留在本次页面，不写入草稿；“需调整”不会自动修改素材、切点或转场。</small>
+                     <small>本切点：通过 {passedContinuityCheckCount} · 未检查 {unreviewedContinuityCheckCount} · 待调整 {needsAdjustmentContinuityCheckCount} · 待复检 {recheckContinuityIssueCount}。结果与待复检原问题会自动保存到项目草稿；“需调整”不会自动修改素材、切点或转场。</small>
                    </div>
                  </div>
               })}
