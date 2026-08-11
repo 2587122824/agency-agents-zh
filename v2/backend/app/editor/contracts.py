@@ -67,6 +67,13 @@ class EditorContinuityIssueContext(BaseModel):
     mode: Literal["frames", "overlay", "action"]
 
 
+class EditorActionSequenceEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    playback_rate: Literal[1]
+    left_context_ms: int = Field(ge=1)
+    right_context_ms: int = Field(ge=1)
+
+
 class EditorContinuityObservation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     boundary_fingerprint: str = Field(min_length=1, max_length=2048)
@@ -80,6 +87,7 @@ class EditorContinuityObservation(BaseModel):
             "sequential_cut_realtime_context",
         ]
     ] = Field(min_length=1, max_length=2)
+    action_sequence_evidence: EditorActionSequenceEvidence | None
 
 
 class SaveEditorDraft(BaseModel):
@@ -100,7 +108,7 @@ class SaveEditorDraft(BaseModel):
 
 
 class EditorDraftRead(BaseModel):
-    schema_version: Literal["editor-draft-session.v6"] = "editor-draft-session.v6"
+    schema_version: Literal["editor-draft-session.v7"] = "editor-draft-session.v7"
     project_id: str
     snapshot_id: str
     base_timeline_id: str

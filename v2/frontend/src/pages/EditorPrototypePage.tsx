@@ -14,10 +14,10 @@ import {
 import { Link, useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
-import type { DeliveryAttempt, DeliveryWorkspace, EditorContinuityObservation, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from '../api/types'
+import type { DeliveryAttempt, DeliveryWorkspace, EditorActionSequenceEvidence, EditorContinuityObservation, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from '../api/types'
 import styles from './EditorPrototypePage.module.css'
 
-const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v9'
+const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v10'
 
 interface LocalEditorDraft {
   schema_version: typeof LOCAL_DRAFT_SCHEMA
@@ -74,10 +74,13 @@ type BoundaryContinuityObservations = Record<
   string,
   Partial<Record<BoundaryContinuityReviewMode, EditorContinuityObservation>>
 >
-type BoundaryContinuityReadyEvidence = Record<
-  string,
-  Partial<Record<'frames-left' | 'frames-right' | 'overlay' | 'action-synchronous' | 'action-sequence-realtime-context', true>>
->
+type BoundaryContinuityReadyEvidence = Record<string, {
+  'frames-left'?: true
+  'frames-right'?: true
+  overlay?: true
+  'action-synchronous'?: true
+  'action-sequence-realtime-context'?: EditorActionSequenceEvidence
+}>
 
 interface BoundaryContinuityIssueContext {
   checkId: string
@@ -1556,7 +1559,11 @@ function BoundaryActionComparison({
   onRememberCandidateComparisonOutcome: (sessionKey: string, sourceKey: string, outcome: BoundaryCandidateComparisonOutcome) => void
   onNotice: (message: string) => void
   observationKey: string
-  onObserved: (observationKey: string, evidence: 'action-synchronous' | 'action-sequence-realtime-context') => void
+  onObserved: (
+    observationKey: string,
+    evidence: 'action-synchronous' | 'action-sequence-realtime-context',
+    actionSequenceEvidence?: EditorActionSequenceEvidence,
+  ) => void
 }) {
   const leftRef = useRef<HTMLVideoElement | null>(null)
   const rightRef = useRef<HTMLVideoElement | null>(null)
@@ -2040,7 +2047,11 @@ function BoundaryActionComparison({
             return
           }
           if (!viewingTunedPhase && rate === 1 && sequenceContextComplete) {
-            onObserved(observationKey, 'action-sequence-realtime-context')
+            onObserved(observationKey, 'action-sequence-realtime-context', {
+              playback_rate: 1,
+              left_context_ms: sequenceLeftDurationMs,
+              right_context_ms: sequenceRightDurationMs,
+            })
           }
           onNotice(!viewingTunedPhase && rate !== 1
             ? `${left.label} → ${right.label} 的原切点 ${rate}× 慢放已完成；慢放只用于分析动作，仍需在 1× 下完整观看顺序切点才能通过。`
@@ -2956,13 +2967,16 @@ export function EditorPrototypePage() {
   const recordBoundaryContinuityReadyEvidence = useCallback((
     observationKey: string,
     evidence: 'frames-left' | 'frames-right' | 'overlay' | 'action-synchronous' | 'action-sequence-realtime-context',
+    actionSequenceEvidence?: EditorActionSequenceEvidence,
   ) => {
-    setBoundaryContinuityReadyEvidence(current => current[observationKey]?.[evidence]
-      ? current
-      : {
+    setBoundaryContinuityReadyEvidence(current => {
+      const value = evidence === 'action-sequence-realtime-context' ? actionSequenceEvidence : true
+      if (!value || current[observationKey]?.[evidence] === value) return current
+      return {
         ...current,
-        [observationKey]: { ...(current[observationKey] ?? {}), [evidence]: true },
-      })
+        [observationKey]: { ...(current[observationKey] ?? {}), [evidence]: value },
+      }
+    })
   }, [])
   const [monitorScale, setMonitorScale] = useState<'fit' | 'actual'>('fit')
   const [monitorFullscreen, setMonitorFullscreen] = useState(false)
@@ -6929,6 +6943,16 @@ export function EditorPrototypePage() {
                        const status: BoundaryContinuityCheckOutcome | 'unreviewed' = outcome ?? 'unreviewed'
                        const observationMode = continuityReviewModeForCheckId(check.id)
                        const currentObservation = boundaryContinuityObservations[boundaryKey]?.[observationMode]
+                       const requiredLeftContextMs = Math.min(1000, Math.max(0, (left.source_out_ms ?? 0) - (left.source_in_ms ?? 0)))
+                       const requiredRightContextMs = Math.min(1000, Math.max(0, (right.source_out_ms ?? 0) - (right.source_in_ms ?? 0)))
+                       const persistedActionSequenceEvidence = currentObservation?.action_sequence_evidence
+                       const persistedActionSequenceCurrent = observationMode !== 'action'
+                         ? persistedActionSequenceEvidence == null
+                         : persistedActionSequenceEvidence?.playback_rate === 1
+                           && persistedActionSequenceEvidence.left_context_ms >= requiredLeftContextMs
+                           && persistedActionSequenceEvidence.left_context_ms <= (left.source_out_ms ?? 0) - (left.source_in_ms ?? 0)
+                           && persistedActionSequenceEvidence.right_context_ms >= requiredRightContextMs
+                           && persistedActionSequenceEvidence.right_context_ms <= (right.source_out_ms ?? 0) - (right.source_in_ms ?? 0)
                        const requiredCompletedSteps = observationMode === 'frames'
                          ? ['left_frame', 'right_frame'] as const
                          : observationMode === 'overlay'
@@ -6937,6 +6961,7 @@ export function EditorPrototypePage() {
                        const persistedObservationCurrent = currentObservation?.boundary_fingerprint === boundaryFingerprint
                          && currentObservation.completed_steps.length === requiredCompletedSteps.length
                          && currentObservation.completed_steps.every((step, index) => step === requiredCompletedSteps[index])
+                         && persistedActionSequenceCurrent
                        const readyEvidence = boundaryContinuityReadyEvidence[continuityObservationKey] ?? {}
                        const observationReady = observationMode === 'frames'
                          ? Boolean(readyEvidence['frames-left'] && readyEvidence['frames-right'])
@@ -6959,6 +6984,9 @@ export function EditorPrototypePage() {
                                  boundary_fingerprint: boundaryFingerprint,
                                  observed_at: new Date().toISOString(),
                                  completed_steps: [...requiredCompletedSteps],
+                                 action_sequence_evidence: observationMode === 'action'
+                                   ? readyEvidence['action-sequence-realtime-context'] ?? null
+                                   : null,
                                },
                              },
                            }))

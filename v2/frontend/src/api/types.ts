@@ -1282,7 +1282,7 @@ export interface Timeline {
   track_config: TimelineTrackConfig
   validation_report: Array<{ code: string; path: string; message: string; evidence: Record<string, unknown> }>
   continuity_review: {
-    schema_version?: 'timeline-continuity-review.v5'
+    schema_version?: 'timeline-continuity-review.v6'
     editor_draft_row_version?: number
     editor_draft_updated_at?: string
     boundary_count?: number
@@ -1303,6 +1303,7 @@ export interface Timeline {
         observation_boundary_fingerprint: string
         observed_at: string
         completed_steps: EditorContinuityObservationStep[]
+        action_sequence_evidence: EditorActionSequenceEvidence | null
       }>
     }>
   }
@@ -1397,6 +1398,13 @@ export interface EditorContinuityObservation {
   boundary_fingerprint: string
   observed_at: string
   completed_steps: EditorContinuityObservationStep[]
+  action_sequence_evidence: EditorActionSequenceEvidence | null
+}
+
+export interface EditorActionSequenceEvidence {
+  playback_rate: 1
+  left_context_ms: number
+  right_context_ms: number
 }
 
 export type EditorContinuityObservationStep =
@@ -1407,7 +1415,7 @@ export type EditorContinuityObservationStep =
   | 'sequential_cut_realtime_context'
 
 export interface EditorDraft {
-  schema_version: 'editor-draft-session.v6'
+  schema_version: 'editor-draft-session.v7'
   project_id: string
   snapshot_id: string
   base_timeline_id: string

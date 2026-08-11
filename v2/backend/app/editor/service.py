@@ -502,11 +502,25 @@ def _freeze_continuity_review(
             outcome = outcomes.get(check_id)
             observation_mode = _continuity_review_mode(check_id)
             observation = observations.get(observation_mode) if isinstance(observations, dict) else None
+            left_source_duration_ms = max(0, (left.get("source_out_ms") or 0) - (left.get("source_in_ms") or 0))
+            right_source_duration_ms = max(0, (right.get("source_out_ms") or 0) - (right.get("source_in_ms") or 0))
+            required_left_context_ms = min(1000, left_source_duration_ms)
+            required_right_context_ms = min(1000, right_source_duration_ms)
+            action_sequence_evidence = observation.get("action_sequence_evidence") if isinstance(observation, dict) else None
+            action_sequence_matches = bool(
+                observation_mode != "action" and action_sequence_evidence is None
+                or observation_mode == "action"
+                and isinstance(action_sequence_evidence, dict)
+                and action_sequence_evidence.get("playback_rate") == 1
+                and required_left_context_ms <= action_sequence_evidence.get("left_context_ms", 0) <= left_source_duration_ms
+                and required_right_context_ms <= action_sequence_evidence.get("right_context_ms", 0) <= right_source_duration_ms
+            )
             observation_matches = bool(
                 isinstance(observation, dict)
                 and observation.get("boundary_fingerprint") == boundary_fingerprint
                 and observation.get("observed_at")
                 and observation.get("completed_steps") == required_observation_steps[observation_mode]
+                and action_sequence_matches
             )
             if outcome != "passed" or check_id in active_context_ids or not observation_matches:
                 unresolved.append({
@@ -527,6 +541,7 @@ def _freeze_continuity_review(
                 ),
                 "observed_at": observation.get("observed_at") if observation_matches else None,
                 "completed_steps": observation.get("completed_steps") if observation_matches else None,
+                "action_sequence_evidence": action_sequence_evidence if observation_matches else None,
             })
         boundaries.append({
             "boundary_key": boundary_key,
@@ -545,7 +560,7 @@ def _freeze_continuity_review(
             f"仍有 {len(unresolved)} 项镜头连续性检查未通过，不能生成可导出版本。",
         )
     return {
-        "schema_version": "timeline-continuity-review.v5",
+        "schema_version": "timeline-continuity-review.v6",
         "editor_draft_row_version": draft.row_version,
         "editor_draft_updated_at": draft.updated_at.isoformat(),
         "boundary_count": len(boundaries),

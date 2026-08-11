@@ -6644,6 +6644,11 @@ def save_fully_reviewed_editor_draft(
                     "overlay": ["overlay"],
                     "action": ["synchronous_action", "sequential_cut_realtime_context"],
                 }[mode],
+                "action_sequence_evidence": {
+                    "playback_rate": 1,
+                    "left_context_ms": min(1000, left["source_out_ms"] - left["source_in_ms"]),
+                    "right_context_ms": min(1000, right["source_out_ms"] - right["source_in_ms"]),
+                } if mode == "action" else None,
             }
             for mode in ("frames", "overlay", "action")
         }
@@ -8024,13 +8029,14 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
                         ], ensure_ascii=False, separators=(",", ":")),
                         "observed_at": "2026-08-11T06:00:00Z",
                         "completed_steps": ["left_frame", "right_frame"],
+                        "action_sequence_evidence": None,
                     },
                 },
             },
         },
     )
     assert saved_draft.status_code == 200
-    assert saved_draft.json()["schema_version"] == "editor-draft-session.v6"
+    assert saved_draft.json()["schema_version"] == "editor-draft-session.v7"
     assert saved_draft.json()["playhead_ms"] == 12_000
     assert saved_draft.json()["continuity_outcomes"] == {
         first_boundary_key: {"motion": "needs_adjustment", "subject": "passed"},
@@ -8135,6 +8141,43 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
     )
     assert incomplete_action_revision.status_code == 409
     assert incomplete_action_revision.headers["x-error-code"] == "TIMELINE_CONTINUITY_REVIEW_INCOMPLETE"
+    insufficient_context_observations = json.loads(json.dumps(reviewed_draft["continuity_observations"]))
+    insufficient_context_observations[reviewed_first_boundary_key]["action"]["action_sequence_evidence"] = {
+        "playback_rate": 1,
+        "left_context_ms": 1,
+        "right_context_ms": 1,
+    }
+    insufficient_context_draft = client.put(
+        f"/api/v1/projects/{project['id']}/editor-draft",
+        json={
+            "actor_id": "test-user",
+            "expected_snapshot_id": snapshot["id"],
+            "base_timeline_id": exported["id"],
+            "base_timeline_row_version": exported["row_version"],
+            "track_config": exported["track_config"],
+            "items": reviewed_draft["items"],
+            "playhead_ms": 0,
+            "continuity_outcomes": reviewed_draft["continuity_outcomes"],
+            "continuity_issue_contexts": {},
+            "continuity_observations": insufficient_context_observations,
+        },
+    )
+    assert insufficient_context_draft.status_code == 200
+    insufficient_context_revision = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{exported['id']}:revise",
+        json={
+            "command_id": "post-delivery-revision-insufficient-action-context",
+            "actor_id": "test-user",
+            "expected_snapshot_id": snapshot["id"],
+            "expected_row_version": exported["row_version"],
+            "expected_editor_draft_row_version": insufficient_context_draft.json()["row_version"],
+            "source": "user",
+            "track_config": exported["track_config"],
+            "items": stripped_draft_items,
+        },
+    )
+    assert insufficient_context_revision.status_code == 409
+    assert insufficient_context_revision.headers["x-error-code"] == "TIMELINE_CONTINUITY_REVIEW_INCOMPLETE"
     reviewed_draft = save_fully_reviewed_editor_draft(
         client, project, exported, exported["track_config"], stripped_draft_items,
     )
@@ -8154,7 +8197,7 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
     assert revised.status_code == 201
     assert revised.json()["status"] == "candidate"
     assert revised.json()["supersedes_timeline_id"] == exported["id"]
-    assert revised.json()["continuity_review"]["schema_version"] == "timeline-continuity-review.v5"
+    assert revised.json()["continuity_review"]["schema_version"] == "timeline-continuity-review.v6"
     assert revised.json()["continuity_review"]["boundary_count"] == 2
     assert revised.json()["continuity_review_hash"]
     assert revised.json()["continuity_review_hash"] == hashlib.sha256(
@@ -8167,6 +8210,13 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
     ).hexdigest()
     assert all(
         check["outcome"] == "passed"
+        for boundary in revised.json()["continuity_review"]["boundaries"]
+        for check in boundary["checks"]
+    )
+    assert all(
+        check["action_sequence_evidence"] is not None
+        if check["observation_mode"] == "action"
+        else check["action_sequence_evidence"] is None
         for boundary in revised.json()["continuity_review"]["boundaries"]
         for check in boundary["checks"]
     )
