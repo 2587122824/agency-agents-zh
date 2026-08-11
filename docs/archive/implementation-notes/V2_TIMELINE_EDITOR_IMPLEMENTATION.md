@@ -584,6 +584,7 @@ timeline.confirmed.v1
 - 完整回归为后端 `305 passed in 164.85s`，Python compileall、Vite 生产构建与 `git diff --check` 通过。最终标准服务 API `13004` / Worker `36596`，创建时间 `2026-08-11 12:43:37.838 / 12:43:37.858`；健康 `ok`，Alembic runtime/head `20260811_43`，四份日志零错误，草稿 `editor-draft-session.v2 / row_version=279 / updated_at=2026-08-11T04:42:56.843950 / playhead_ms=0 / outcomes={} / contexts={}`，最终服务周期 editor-draft PUT 为 0。
 - 可导出修订现强制消费完全通过的连续性草稿。客户端主操作在三类未解决检查非零时只定位下一项；全部通过后先保存草稿，再提交 `expected_editor_draft_row_version`。后端复验草稿基线、内容与每个当前双画面边界的三项结果，拒绝未检查、需调整、待复检、context 残留、陈旧行版本或条目不一致。
 - 新 Timeline 字段 `continuity_review / continuity_review_hash` 由迁移 `20260811_44` 建立。冻结快照包含来源草稿、稳定边界双方、Asset、关系与 passed 清单，独立哈希用于版本证据；旧 Timeline 回填空值。`/editor/setup` 的已有版本修订入口改为进入正式剪辑台，不能再从无连续性检查的旧表单绕过门禁。
+- 功能提交 `cc4a6ecf` 已推送到 `main`。真实 Browser 验收从三项未检查门禁进入，三项通过后确认弹窗显示 `1/1 个切点通过`，实际创建 v7 并冻结 1 个边界；完整哈希为 `ed4205ebfa36026ba2e4dc42182c71203f32dba82b989b524652d051cb9a4461`。原显式缺口继续以 `TIMELINE_GAP_UNRESOLVED` 留在 validation report；setup 入口文案、title 与正式剪辑台跳转通过，1280 宽度无横向溢出，页面 warning/error 为空。完整后端 `305 passed in 164.95s`、API 文件 `125 passed in 157.26s`、针对性 409/冻结哈希测试、compileall、Vite build 和 diff check 通过。最终标准服务 API `45540` / Worker `45176`，创建时间 `2026-08-11 13:17:17.677 / 13:17:17.694`；健康 `ok`，Alembic runtime/head `20260811_44`，四份日志零实际错误。草稿最终为 `schema=v2 / row_version=1 / playhead_ms=0 / SH-001 0..409ms / outcomes={} / contexts={}`，最终服务周期 editor-draft PUT 为 0。
 
 ## 10. 迁移与索引
 

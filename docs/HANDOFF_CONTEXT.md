@@ -1,6 +1,6 @@
 # 片场 V2 当前交接
 
-> 更新日期：2026-08-09
+> 更新日期：2026-08-11
 >
 > 文档入口见 [README](./README.md)。本文只保留恢复开发所需的当前事实，不再累积完整 Sprint 日志。
 
@@ -578,7 +578,7 @@ v2/runtime/worker.err.log
 - 撤销/重做恢复画面合同后，changed boundary keys 现直接进入 `history` 受影响切点试听。新时间线只保留双方有素材的现存 key并按 index 顺序播放；缺口或删除边界跳过，单/多切点复用既有切前后窗口和媒体状态机。试听不修改恢复的人工结果，按钮可显式停止，零合法切点只提示不播放。
 - 提交 `32e2eccf` 已发布撤销/重做后受影响切点自动试听并推送到 `main`。单切点真实验收中 SH-001 入场 fade 的 undo 启动 `停止撤销/重做切点试听（1/1）`，motion 同时恢复 needs，播放完成提示已播放 1；redo 同样以 recheck/fade 启动并完成。多切点验收临时补 SH-003.video 后，SH-001 源窗 `+1帧` 的 undo/redo 均精确出现 `1/2 SH-002 → SH-001` 再到 `2/2 SH-001 → SH-003.video`，最终提示已播放 2；撤销临时补片时只剩失效 key，明确安全跳过且无播放。所有验收编辑已撤销，Inspector/html/body `244/244`、`1280/1280`，页面日志为空。完整后端 `305 passed in 162.05s`、compileall、Vite build、diff check 通过。最终 API `18332` / Worker `31200`，创建时间 `2026-08-11 12:14:52.317 / 12:14:52.336`；健康 `ok`、Alembic runtime/head `20260730_42`、四份日志无错误。草稿 `row_version=272 / updated_at=2026-08-11T04:14:12.034501 / playhead_ms=0 / SH-001 0..409ms / 原缺口`，最终服务周期 editor-draft PUT 为 0。
 - 提交 `a2c72e98` 已把人工连续性审核纳入权威草稿，`fdb2355f` 修正真实 Browser 验收发现的旧“结果不写草稿”说明，均已推送到 `main`。服务端 `editor-draft-session.v2` 与本地 `editor-local-draft.v5` 保存稳定 boundary key 下的 `continuity_outcomes / continuity_issue_contexts`；迁移 `20260811_43` 显式新增两列并把旧开发审核状态重建为空，不增加 v1/v4 运行时兼容。真实验收依次证明 motion needs/handling 刷新恢复、SH-001 源窗 `+1帧` 后 recheck 刷新恢复，以及 passed 刷新保留且 context 清除；最终恢复三项未检查、源窗 `0..409ms`、播放头 0。html/body `1280/1280`、Inspector `244/244`，页面 warning/error 为空。完整后端 `305 passed in 164.85s`、compileall、Vite build、diff check 通过。最终 API `13004` / Worker `36596`，创建时间 `2026-08-11 12:43:37.838 / 12:43:37.858`；健康 `ok`、Alembic runtime/head `20260811_43`、四份日志无错误。草稿最终 `schema=editor-draft-session.v2 / row_version=279 / updated_at=2026-08-11T04:42:56.843950 / playhead_ms=0 / outcomes={} / contexts={}`，最终服务周期 editor-draft PUT 为 0。
-- 当前待发布功能把人工连续性纳入可导出版本硬门禁：顶部在未检查/需调整/待复检非零时只定位下一问题，全部通过后显式保存草稿并携带精确行版本修订。后端复验草稿基线、内容与当前双画面边界必需清单；迁移 `20260811_44` 为 Timeline 新增 `timeline-continuity-review.v1` 冻结快照与独立哈希。旧准备页已有版本修订统一跳正式剪辑台，不再保留绕过入口。
+- 提交 `cc4a6ecf` 已发布人工连续性可导出版本硬门禁并推送到 `main`。顶部在未检查/需调整/待复检非零时只定位下一问题，全部通过后显式保存草稿并携带精确行版本修订；后端复验草稿基线、内容与当前双画面边界必需清单。迁移 `20260811_44` 为 Timeline 新增 `timeline-continuity-review.v1` 冻结快照与独立哈希，旧准备页已有版本修订统一跳正式剪辑台，不再保留绕过入口。真实 Browser 验收依次覆盖 `处理 3 个衔接检查`、三项全部通过、生成确认弹窗 `1/1 个切点通过` 和实际创建 v7；v7 冻结 1 个切点，审核哈希为 `ed4205ebfa36026ba2e4dc42182c71203f32dba82b989b524652d051cb9a4461`，既有 9.9 秒缺口仍由独立的 `TIMELINE_GAP_UNRESOLVED` 阻断。`/editor/setup` 按钮文案、说明与跳转到正式剪辑台均通过，1280 宽度 html/body 无溢出，页面 warning/error 为空。完整后端 `305 passed in 164.95s`，API 文件 `125 passed in 157.26s`，针对性门禁/哈希测试、compileall、Vite build 与 diff check 均通过。最终标准服务 API `45540` / Worker `45176`，创建时间 `2026-08-11 13:17:17.677 / 13:17:17.694`；健康 `ok`，Alembic runtime/head `20260811_44`，四份日志零实际错误。重启后草稿 `editor-draft-session.v2 / row_version=1 / updated_at=2026-08-11T05:09:17.809189 / playhead_ms=0 / SH-001 source=0..409ms / outcomes={} / contexts={}`，三项恢复未检查，最终服务周期 editor-draft PUT 为 0。
 
 ## 9. 下一步
 
