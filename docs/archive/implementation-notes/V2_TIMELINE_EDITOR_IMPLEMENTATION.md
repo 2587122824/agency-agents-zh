@@ -693,3 +693,4 @@ Alembic 修订：`20260716_09`。
 - 发布 `fbb8d281`：完整后端隔离外部执行后 `306 passed in 180.39s`，compileall、Vite `/assets/index-DERCEPFH.js`、diff check 通过；最终 API `53096` / Worker `1892`、Alembic `20260813_50`、draft null、四日志零错误。
 - 邻帧审核耗尽后新增确定性无损续办：只有当前双方全部合法 ±1..±4 exact-key 均为 `kept_baseline` 且无 B 时，平铺合法的滚动 ±1 帧及与基线不同的最短转场试用；不读取指标、不选方向、不播放、不采用或写草稿。无合法项时明确回到素材/结构处理。
 - 发布 `0192a4a2`：完整后端 `306 passed in 185.53s`，compileall、Vite `/assets/index-ClLmzjZ8.js`、diff check 通过；最终 API `52712` / Worker `50780`、Alembic `20260813_50`、draft null、四日志零错误。
+- 草稿合同升级 `editor-draft-session.v9 / editor-local-draft.v12`，迁移 `20260813_51` 重建开发候选 session。`alternative_outcomes` 追加保存续办区滚动/转场完整对照后的 `kept_baseline`；已排除按钮跨刷新隐藏，全部排除后转入素材/镜头结构处理，普通临时试调不登记。

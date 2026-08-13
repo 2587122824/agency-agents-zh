@@ -217,7 +217,7 @@ def save_editor_draft(session: Session, project: Project, payload: SaveEditorDra
         )
         repository.add(draft)
     else:
-        draft.schema_version = "editor-draft-session.v8"
+        draft.schema_version = "editor-draft-session.v9"
         draft.snapshot_id = snapshot.id
         draft.base_timeline_id = timeline.id
         draft.base_timeline_row_version = timeline.row_version
@@ -248,6 +248,10 @@ def save_editor_draft(session: Session, project: Project, payload: SaveEditorDra
                 "comparison_outcomes": {
                     **existing.get("comparison_outcomes", {}),
                     **incoming["comparison_outcomes"],
+                },
+                "alternative_outcomes": {
+                    **existing.get("alternative_outcomes", {}),
+                    **incoming["alternative_outcomes"],
                 },
             }
         draft.candidate_review_sessions = merged_candidate_review_sessions

@@ -135,6 +135,7 @@ def test_planning_authority_backfill_uses_persisted_candidate_status(tmp_path: P
     assert "candidate_review_sessions" in {
         column["name"] for column in inspect(upgraded_engine).get_columns("editor_draft_sessions")
     }
+    assert command.current(config, check_heads=True) is None
     assert {
         "product_entity_version_ids",
         "primary_reference_entity_version_id",

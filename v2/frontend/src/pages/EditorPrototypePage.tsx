@@ -18,7 +18,7 @@ import { api } from '../api/client'
 import type { DeliveryAttempt, DeliveryWorkspace, EditorActionSequenceEvidence, EditorBoundaryCandidateReviewSession, EditorContinuityObservation, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from '../api/types'
 import styles from './EditorPrototypePage.module.css'
 
-const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v11'
+const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v12'
 
 interface LocalEditorDraft {
   schema_version: typeof LOCAL_DRAFT_SCHEMA
@@ -99,11 +99,13 @@ interface EditorHistorySnapshot {
 interface BoundaryCandidateReviewSession {
   measuredMotionEvidence: Record<string, BoundaryMotionAnalysis>
   comparisonOutcomes: Record<string, BoundaryCandidateComparisonOutcome>
+  alternativeOutcomes: Record<string, 'kept_baseline'>
 }
 
 const EMPTY_BOUNDARY_CANDIDATE_REVIEW_SESSION: BoundaryCandidateReviewSession = {
   measuredMotionEvidence: {},
   comparisonOutcomes: {},
+  alternativeOutcomes: {},
 }
 
 function boundaryCandidateReviewSessionKey(
@@ -1560,6 +1562,7 @@ function BoundaryActionComparison({
   onConsumeGuidedScanRequest,
   onRememberCandidateMotionEvidence,
   onRememberCandidateComparisonOutcome,
+  onRememberAlternativeOutcome,
   onNotice,
   observationKey,
   onObserved,
@@ -1587,6 +1590,7 @@ function BoundaryActionComparison({
   onConsumeGuidedScanRequest: (requestToken: number) => void
   onRememberCandidateMotionEvidence: (sessionKey: string, sourceKey: string, analysis: BoundaryMotionAnalysis) => void
   onRememberCandidateComparisonOutcome: (sessionKey: string, sourceKey: string, outcome: BoundaryCandidateComparisonOutcome) => void
+  onRememberAlternativeOutcome: (sessionKey: string, alternativeKey: string, outcome: 'kept_baseline') => void
   onNotice: (message: string) => void
   observationKey: string
   onObserved: (
@@ -1624,9 +1628,11 @@ function BoundaryActionComparison({
   const [tunedMotionEvidence, setTunedMotionEvidence] = useState<{ sourceKey: string; analysis: BoundaryMotionAnalysis } | null>(null)
   const measuredCandidateMotionEvidence = candidateReviewSession.measuredMotionEvidence
   const candidateComparisonOutcomes = candidateReviewSession.comparisonOutcomes
+  const alternativeOutcomes = candidateReviewSession.alternativeOutcomes
   const [phaseCandidateScanSide, setPhaseCandidateScanSide] = useState<'left' | 'right' | null>(null)
   const [phaseCandidateScanExpanded, setPhaseCandidateScanExpanded] = useState(false)
   const [guidedIssueLabel, setGuidedIssueLabel] = useState<string | null>(null)
+  const [alternativeReviewTrialKey, setAlternativeReviewTrialKey] = useState<string | null>(null)
   const [pendingPhaseCandidateCompare, setPendingPhaseCandidateCompare] = useState<{ side: 'left' | 'right'; deltaMs: number } | null>(null)
   const leftBaseSourceInMs = left.source_in_ms ?? 0
   const leftBaseSourceOutMs = left.source_out_ms ?? leftBaseSourceInMs
@@ -1920,6 +1926,15 @@ function BoundaryActionComparison({
     : !baselinePairedCut
       ? { type: 'cut' as const, durationMs: 0, label: '试用直接切换' }
       : null
+  const exhaustedCandidateAlternatives = [
+    ...(rollMinimumDeltaMs <= -frameStepMs ? [{ key: `roll:${-frameStepMs}`, label: '滚动切点 −1帧' }] : []),
+    ...(rollMaximumDeltaMs >= frameStepMs ? [{ key: `roll:${frameStepMs}`, label: '滚动切点 +1帧' }] : []),
+    ...(exhaustedCandidateTransitionTrial ? [{
+      key: `transition:${exhaustedCandidateTransitionTrial.type}:${exhaustedCandidateTransitionTrial.durationMs}`,
+      label: exhaustedCandidateTransitionTrial.label,
+    }] : []),
+  ]
+  const pendingExhaustedCandidateAlternatives = exhaustedCandidateAlternatives.filter(alternative => !alternativeOutcomes[alternative.key])
   const activeTransitionTrial = viewingTunedPhase ? transitionTrial : null
   const activeLeftFadeMs = activeTransitionTrial
     ? activeTransitionTrial.type === 'fade' ? activeTransitionTrial.durationMs : 0
@@ -2382,7 +2397,7 @@ function BoundaryActionComparison({
     onNotice(`已显式扩展${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}到 ±4 帧；额外合法候选均已保留 A，只展开供人工复看，不自动播放。`)
   }
 
-  const adjustRollTrial = (requestedDeltaMs: number) => {
+  const adjustRollTrial = (requestedDeltaMs: number, reviewKey: string | null = null) => {
     if (hasPhaseTrial || transitionTrial) return
     const nextDeltaMs = Math.max(
       rollMinimumDeltaMs,
@@ -2394,6 +2409,7 @@ function BoundaryActionComparison({
     cancelPhaseSequenceComparison()
     positionSequenceMedia()
     setPhaseDecisionSourceKey(null)
+    setAlternativeReviewTrialKey(reviewKey)
     setPhaseView('tuned')
     setPhaseCandidateScanSide(null)
     setRollTrialDeltaMs(nextDeltaMs)
@@ -2407,7 +2423,7 @@ function BoundaryActionComparison({
     ? '原相位'
     : `${deltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(deltaMs), fps)}`
 
-  const chooseTransitionTrial = (type: 'cut' | 'fade', requestedDurationMs = 0) => {
+  const chooseTransitionTrial = (type: 'cut' | 'fade', requestedDurationMs = 0, reviewKey: string | null = null) => {
     if (hasMotionTrial) return
     const durationMs = type === 'fade'
       ? Math.max(100, Math.min(transitionMaximumDurationMs, requestedDurationMs))
@@ -2420,6 +2436,7 @@ function BoundaryActionComparison({
     cancelPhaseSequenceComparison()
     positionSequenceMedia()
     setPhaseDecisionSourceKey(null)
+    setAlternativeReviewTrialKey(reviewKey)
     setPhaseCandidateScanSide(null)
     setTransitionTrial(matchesBaseline ? null : { type, durationMs })
     setPhaseView(matchesBaseline ? 'baseline' : 'tuned')
@@ -2439,6 +2456,7 @@ function BoundaryActionComparison({
     setLeftPhaseDeltaMs(0)
     setRightPhaseDeltaMs(0)
     setPhaseDecisionSourceKey(null)
+    setAlternativeReviewTrialKey(null)
     setPhaseView('baseline')
     setProgressMs(0)
     if (announce) onNotice(`已清除 ${left.label} → ${right.label} 的全部本地试调；草稿未改变。`)
@@ -2476,6 +2494,9 @@ function BoundaryActionComparison({
     if (phaseDecisionReady && activePhaseCandidateSourceKey) {
       onRememberCandidateComparisonOutcome(candidateReviewSessionKey, activePhaseCandidateSourceKey, 'kept_baseline')
       if (continueCandidateReviewAfterDecision(`已保留 ${left.label} → ${right.label} 的 A 原切点，本次试调未写入草稿`)) return
+    }
+    if (phaseDecisionReady && alternativeReviewTrialKey) {
+      onRememberAlternativeOutcome(candidateReviewSessionKey, alternativeReviewTrialKey, 'kept_baseline')
     }
     resetPhase()
     onNotice(`已保留 ${left.label} → ${right.label} 的 A 原切点；本次试调未写入草稿。`)
@@ -2801,17 +2822,21 @@ function BoundaryActionComparison({
         <small>相位微调已人工排除。可显式选择另一类 B 继续比较；系统不选择方向、不播放，也不自动采用。</small>
       </span>
       <div>
-        {rollMinimumDeltaMs <= -frameStepMs && <button type="button" onClick={() => adjustRollTrial(-frameStepMs)}>滚动切点 −1帧</button>}
-        {rollMaximumDeltaMs >= frameStepMs && <button type="button" onClick={() => adjustRollTrial(frameStepMs)}>滚动切点 +1帧</button>}
-        {exhaustedCandidateTransitionTrial && <button
+        {pendingExhaustedCandidateAlternatives.map(alternative => <button
+          key={alternative.key}
           type="button"
-          onClick={() => chooseTransitionTrial(exhaustedCandidateTransitionTrial.type, exhaustedCandidateTransitionTrial.durationMs)}
-        >{exhaustedCandidateTransitionTrial.label}</button>}
+          onClick={() => alternative.key.startsWith('roll:')
+            ? adjustRollTrial(Number(alternative.key.slice('roll:'.length)), alternative.key)
+            : exhaustedCandidateTransitionTrial && chooseTransitionTrial(
+              exhaustedCandidateTransitionTrial.type,
+              exhaustedCandidateTransitionTrial.durationMs,
+              alternative.key,
+            )}
+        >{alternative.label}</button>)}
       </div>
-      {!exhaustedCandidateTransitionTrial
-        && rollMinimumDeltaMs > -frameStepMs
-        && rollMaximumDeltaMs < frameStepMs
-        && <small>当前源窗和转场合同没有可用的下一类无损试调；请回到素材或镜头结构处理。</small>}
+      {!pendingExhaustedCandidateAlternatives.length && <small>{exhaustedCandidateAlternatives.length
+        ? `其他 ${exhaustedCandidateAlternatives.length} 项合法原子试调也已完整对照并保留 A；请回到素材或镜头结构处理。`
+        : '当前源窗和转场合同没有可用的下一类无损试调；请回到素材或镜头结构处理。'}</small>}
     </section>}
     <div className={styles.boundaryTransitionTrial}>
       <span><strong>转场无损试用</strong><small>A 为当前 {baselineTransitionLabel}；B 在顺序舞台真实显示淡出至黑场再淡入，不是交叉叠化。</small></span>
@@ -3187,6 +3212,24 @@ export function EditorPrototypePage() {
     })
     setDirty(true)
   }, [replaceBoundaryCandidateReviewSessions])
+  const rememberBoundaryAlternativeOutcome = useCallback((
+    sessionKey: string,
+    alternativeKey: string,
+    outcome: 'kept_baseline',
+  ) => {
+    candidateReviewSessionsLoadedRef.current = true
+    const current = boundaryCandidateReviewSessionsRef.current
+    const session = current[sessionKey] ?? EMPTY_BOUNDARY_CANDIDATE_REVIEW_SESSION
+    if (session.alternativeOutcomes[alternativeKey] === outcome) return
+    replaceBoundaryCandidateReviewSessions({
+      ...current,
+      [sessionKey]: {
+        ...session,
+        alternativeOutcomes: { ...session.alternativeOutcomes, [alternativeKey]: outcome },
+      },
+    })
+    setDirty(true)
+  }, [replaceBoundaryCandidateReviewSessions])
   const [pendingBoundaryPreviewKey, setPendingBoundaryPreviewKey] = useState<string | null>(null)
   const [boundaryRollMonitor, setBoundaryRollMonitor] = useState<{
     boundaryKey: string
@@ -3396,6 +3439,7 @@ export function EditorPrototypePage() {
       Object.entries(remote?.candidate_review_sessions ?? {}).map(([key, session]) => [key, {
         measuredMotionEvidence: session.measured_motion_evidence,
         comparisonOutcomes: session.comparison_outcomes,
+        alternativeOutcomes: session.alternative_outcomes,
       }]),
     )
     const remoteContinuityIssueContexts = Object.fromEntries(
@@ -3461,6 +3505,10 @@ export function EditorPrototypePage() {
           comparisonOutcomes: {
             ...restoredSession.comparisonOutcomes,
             ...currentSession.comparisonOutcomes,
+          },
+          alternativeOutcomes: {
+            ...restoredSession.alternativeOutcomes,
+            ...currentSession.alternativeOutcomes,
           },
         }]
       }))
@@ -4079,6 +4127,7 @@ export function EditorPrototypePage() {
       Object.entries(boundaryCandidateReviewSessionsRef.current).map(([key, session]) => [key, {
         measured_motion_evidence: session.measuredMotionEvidence,
         comparison_outcomes: session.comparisonOutcomes,
+        alternative_outcomes: session.alternativeOutcomes,
       }]),
     ) as Record<string, EditorBoundaryCandidateReviewSession>)
   }
@@ -7867,6 +7916,7 @@ export function EditorPrototypePage() {
                          ))}
                          onRememberCandidateMotionEvidence={rememberBoundaryCandidateMotionEvidence}
                          onRememberCandidateComparisonOutcome={rememberBoundaryCandidateComparisonOutcome}
+                         onRememberAlternativeOutcome={rememberBoundaryAlternativeOutcome}
                          onNotice={setNotice}
                          observationKey={continuityObservationKey}
                          onObserved={recordBoundaryContinuityReadyEvidence}

@@ -337,6 +337,8 @@ SQLite 目前适用于本地单用户阶段。Repository 已隔离持久层，�
 
 邻帧耗尽投影只在当前双方合法 ±1..±4 exact-key 全部为 `kept_baseline` 且没有活动 B 时成立。页面从既有 `rollMinimumDeltaMs / rollMaximumDeltaMs / frameStepMs` 和成对转场基线、双方片段一半时长门禁派生全部下一类合法原子试调；滚动只暴露 ±1 帧方向，转场只暴露与 A 不同的直接切换或 `min(200ms, maximum)` 淡出淡入。按钮分别复用 `adjustRollTrial / chooseTransitionTrial`，因此只更新瞬时 phase/transition trial，继续经过既有证据和人工采用门禁；投影不写草稿、不保存“下一步”、不调用指标或媒体、不新增 Timeline/API/迁移合同。
 
+草稿 v9 的候选 session 新增 `alternative_outcomes: Record<alternativeKey, kept_baseline>`，最多 3 项并禁止额外 outcome。前端只给续办区启动的滚动/转场 B 绑定临时 review key；完整 A→B 后明确保留 A 才登记。服务端仍按 session key、再按 map key 追加合并，空或迟到 payload 不能删除已存替代结论；草稿 DELETE 才整体清除。迁移 `20260813_51` 显式把开发草稿升级到 v9 并重建 candidate sessions 为空，本地合同升级 v12，不保留 v8/v11 运行时兼容。替代结果不进入 Timeline、history、连续性 passed、FFmpeg 或推荐逻辑。
+
 `comparisonEvidenceReady` 要求当前试调存在且 A/B 像素、A/B 动作四套 evidence 同时匹配；手动与候选自动 A→B 都还要求两路顺序媒体已经 seek 到当前 source key。A/B 阶段切换导致窗口改变时，播放 effect 等待新一轮 `seeked`，不会沿用上一视图的 loaded 状态。决策不再是独立布尔值，而记录包含条目、素材、基础源窗、相位、滚动和转场参数的试调 key；只有该 key 仍等于当前试调且四套证据仍有效时才渲染结论。证据失效会停止活动对照，所有调整与清除路径清空结论和候选等待。该实现不进入 Timeline、EditorDraftSession、API、数据库迁移或 FFmpeg。
 
 邻帧候选的已实测动作记忆使用 `EditorPrototypePage` 持有的 `Record<reviewSessionKey, BoundaryCandidateReviewSession>`；每个 session 内保存 `Record<exactCandidateSourceKey, BoundaryMotionAnalysis>`，只在当前试调为当前已挂载范围内合法的单侧 `±1..±4` 帧、没有滚动或转场试调，且当前 B 动作探针返回有效分析时登记。review session key 包含 project、双方 item/Asset、双方基础源入出点、frame step 与 fps；exact key 继续包含双方 item/Asset、双方基础源入出点、侧别、delta 与派生的六个动作源时点。`BoundaryActionComparison` 通过 props 精确读取当前 session，并用稳定父级回调按 session/source key 更新；观察模式切换可以卸载全部隐藏媒体而不丢失审核记忆，边界合同变化则自然读取新的空 session。该缓存不触发候选批量动作解码、不进入 query cache、localStorage、草稿指纹、后端合同或迁移，也不参与排序和决策。

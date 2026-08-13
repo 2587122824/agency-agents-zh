@@ -162,8 +162,12 @@ class EditorBoundaryCandidateReviewSession(BaseModel):
         str,
         Literal["completed", "kept_baseline", "shortlisted"],
     ] = Field(max_length=8)
+    alternative_outcomes: dict[
+        str,
+        Literal["kept_baseline"],
+    ] = Field(max_length=3)
 
-    @field_validator("measured_motion_evidence", "comparison_outcomes")
+    @field_validator("measured_motion_evidence", "comparison_outcomes", "alternative_outcomes")
     @classmethod
     def validate_source_keys(cls, values: dict[str, object]) -> dict[str, object]:
         if any(not key or len(key) > 2048 for key in values):
@@ -202,7 +206,7 @@ class SaveEditorDraft(BaseModel):
 
 
 class EditorDraftRead(BaseModel):
-    schema_version: Literal["editor-draft-session.v8"] = "editor-draft-session.v8"
+    schema_version: Literal["editor-draft-session.v9"] = "editor-draft-session.v9"
     project_id: str
     snapshot_id: str
     base_timeline_id: str

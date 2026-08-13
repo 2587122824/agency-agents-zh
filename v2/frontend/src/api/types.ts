@@ -1452,6 +1452,7 @@ export type EditorBoundaryCandidateComparisonOutcome = 'completed' | 'kept_basel
 export interface EditorBoundaryCandidateReviewSession {
   measured_motion_evidence: Record<string, EditorBoundaryMotionAnalysis>
   comparison_outcomes: Record<string, EditorBoundaryCandidateComparisonOutcome>
+  alternative_outcomes: Record<string, 'kept_baseline'>
 }
 
 export type EditorContinuityObservationStep =
@@ -1462,7 +1463,7 @@ export type EditorContinuityObservationStep =
   | 'sequential_cut_realtime_context'
 
 export interface EditorDraft {
-  schema_version: 'editor-draft-session.v8'
+  schema_version: 'editor-draft-session.v9'
   project_id: string
   snapshot_id: string
   base_timeline_id: string
