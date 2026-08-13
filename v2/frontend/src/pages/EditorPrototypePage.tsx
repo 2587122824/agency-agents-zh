@@ -263,6 +263,10 @@ function canonicalDraftValue(value: unknown): unknown {
     .map(([key, child]) => [key, canonicalDraftValue(child)]))
 }
 
+function serverTimestampMs(value: string) {
+  return Date.parse(/[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`)
+}
+
 function editorDraftFingerprint(
   sourceTimeline: Timeline | null,
   items: TimelineItem[],
@@ -3364,7 +3368,7 @@ export function EditorPrototypePage() {
       && (
         !localRestored
         || localMatchesRemote
-        || new Date(remote!.updated_at).getTime() >= new Date(localRestored.saved_at).getTime()
+        || serverTimestampMs(remote!.updated_at) >= Date.parse(localRestored.saved_at)
       )
     )
     const restoredItems = useRemote && remoteItems
