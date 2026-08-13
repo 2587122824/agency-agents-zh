@@ -3079,7 +3079,6 @@ export function EditorPrototypePage() {
     requestToken: number
   } | null>(null)
   const [boundaryCandidateReviewSessions, setBoundaryCandidateReviewSessions] = useState<Record<string, BoundaryCandidateReviewSession>>({})
-  const [editorDraftRestored, setEditorDraftRestored] = useState(false)
   const boundaryCandidateReviewSessionsRef = useRef<Record<string, BoundaryCandidateReviewSession>>({})
   const replaceBoundaryCandidateReviewSessions = useCallback((sessions: Record<string, BoundaryCandidateReviewSession>) => {
     boundaryCandidateReviewSessionsRef.current = sessions
@@ -3254,7 +3253,6 @@ export function EditorPrototypePage() {
     setBoundaryContinuityObservations({})
     setBoundaryContinuityReadyEvidence({})
     replaceBoundaryCandidateReviewSessions({})
-    setEditorDraftRestored(false)
     setBoundaryContinuityObservations({})
     setBoundaryContinuityReadyEvidence({})
     setDirty(false)
@@ -3404,7 +3402,6 @@ export function EditorPrototypePage() {
       : localRestored
         ? `已恢复 ${new Date(localRestored.saved_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 的本地草稿。`
         : '当前时间线已同步；开始调整后会自动保存到项目。')
-    setEditorDraftRestored(true)
   }, [sourceTimeline?.id, sourceTimeline?.row_version, localDraftKey, serverDraft.data, serverDraft.isPending, workspace.data])
 
   const durationMs = workspace.data?.duration_ms ?? 15000
@@ -3579,7 +3576,6 @@ export function EditorPrototypePage() {
     boundary => boundary.index > activeBoundaryIndex,
   ) ?? unresolvedBoundaryContinuityReviews[0] ?? null
   useEffect(() => {
-    if (!editorDraftRestored) return
     const currentBoundaryKeys = new Set(mainBoundaries.map(boundary => boundary.key))
     setBoundaryContinuityIssueContexts(current => {
       const retained = Object.entries(current).filter(([key]) => currentBoundaryKeys.has(key))
@@ -3589,20 +3585,7 @@ export function EditorPrototypePage() {
       const retained = Object.entries(current).filter(([key]) => currentBoundaryKeys.has(key))
       return retained.length === Object.keys(current).length ? current : Object.fromEntries(retained)
     })
-    const validCandidateSessionKeys = new Set(mainBoundaries.flatMap(boundary => (
-      boundary.left.asset_id && boundary.right.asset_id
-        ? [boundaryCandidateReviewSessionKey(projectId, boundary.left, boundary.right, frameStepMs, outputFps)]
-        : []
-    )))
-    const currentCandidateSessions = boundaryCandidateReviewSessionsRef.current
-    const retainedCandidateSessions = Object.fromEntries(
-      Object.entries(currentCandidateSessions).filter(([key]) => validCandidateSessionKeys.has(key)),
-    )
-    if (Object.keys(retainedCandidateSessions).length !== Object.keys(currentCandidateSessions).length) {
-      replaceBoundaryCandidateReviewSessions(retainedCandidateSessions)
-      setDirty(true)
-    }
-  }, [editorDraftRestored, frameStepMs, mainBoundaries, outputFps, projectId, replaceBoundaryCandidateReviewSessions])
+  }, [mainBoundaries])
   const candidateReviewFollowUpBoundaries = useMemo(
     () => mainBoundaries.flatMap((boundary, index) => {
       if (!boundary.left.asset_id || !boundary.right.asset_id) return []
