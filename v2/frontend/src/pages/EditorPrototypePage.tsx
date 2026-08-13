@@ -1748,6 +1748,11 @@ function BoundaryActionComparison({
       : candidate.deltaMs >= rightMinimumPhaseMs && candidate.deltaMs <= rightMaximumPhaseMs)
   const leftDefaultPhaseCandidates = legalPhaseCandidatesForSide('left', defaultPhaseCandidateFrameOffsets)
   const rightDefaultPhaseCandidates = legalPhaseCandidatesForSide('right', defaultPhaseCandidateFrameOffsets)
+  const pendingDefaultPhaseCandidateCount = (side: 'left' | 'right', candidates: Array<{ frameOffset: number; deltaMs: number }>) => candidates
+    .filter(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(side, candidate.deltaMs)] !== 'kept_baseline')
+    .length
+  const leftPendingDefaultPhaseCandidateCount = pendingDefaultPhaseCandidateCount('left', leftDefaultPhaseCandidates)
+  const rightPendingDefaultPhaseCandidateCount = pendingDefaultPhaseCandidateCount('right', rightDefaultPhaseCandidates)
   const allNearbyPhaseCandidates = phaseCandidateScanSide
     ? legalPhaseCandidatesForSide(phaseCandidateScanSide, allPhaseCandidateFrameOffsets)
     : []
@@ -1777,8 +1782,8 @@ function BoundaryActionComparison({
   const nextReviewPhaseCandidate = nextUnreviewedPhaseCandidate ?? nextUndecidedPhaseCandidate ?? nextShortlistedPhaseCandidate
   const otherGuidedScanSide = phaseCandidateScanSide === 'left' ? 'right' : 'left'
   const otherGuidedScanCandidateCount = phaseCandidateScanSide === 'left'
-    ? rightDefaultPhaseCandidates.length
-    : leftDefaultPhaseCandidates.length
+    ? rightPendingDefaultPhaseCandidateCount
+    : leftPendingDefaultPhaseCandidateCount
   const phaseCandidateElementId = (side: 'left' | 'right', frameOffset: number) => `phase-candidate-${left.id}-${right.id}-${side}-${frameOffset}`
   const isPhaseCandidateSelected = (side: 'left' | 'right', deltaMs: number) => side === 'left'
     ? leftPhaseDeltaMs === deltaMs && rightPhaseDeltaMs === 0
@@ -1947,17 +1952,32 @@ function BoundaryActionComparison({
 
   useEffect(() => {
     if (!guidedScanRequest) return
-    const preferredSide = leftDefaultPhaseCandidates.length > 0
+    const preferredSide = leftPendingDefaultPhaseCandidateCount > 0
       ? 'left'
-      : rightDefaultPhaseCandidates.length > 0 ? 'right' : null
+      : rightPendingDefaultPhaseCandidateCount > 0
+        ? 'right'
+        : leftDefaultPhaseCandidates.length > 0
+          ? 'left'
+          : rightDefaultPhaseCandidates.length > 0 ? 'right' : null
+    const skippedCompletedSide = preferredSide === 'right'
+      && leftDefaultPhaseCandidates.length > 0
+      && leftPendingDefaultPhaseCandidateCount === 0
     setGuidedIssueLabel(guidedScanRequest.issueLabel)
     setPhaseCandidateScanSide(preferredSide)
     setPhaseCandidateScanExpanded(false)
     onNotice(preferredSide
-      ? `正在处理“${guidedScanRequest.issueLabel}”；已自动打开${preferredSide === 'left' ? '前镜' : '后镜'} ±2 帧内的合法候选，不排序、不推荐。`
+      ? `正在处理“${guidedScanRequest.issueLabel}”；${skippedCompletedSide ? '前镜默认候选均已保留 A，已继续打开' : '已自动打开'}${preferredSide === 'left' ? '前镜' : '后镜'} ±2 帧内的${preferredSide === 'left' ? leftPendingDefaultPhaseCandidateCount : rightPendingDefaultPhaseCandidateCount} 个待处理候选，不排序、不推荐。`
       : `正在处理“${guidedScanRequest.issueLabel}”；当前切点两侧在 ±2 帧内都没有合法源窗口候选。`)
     onConsumeGuidedScanRequest(guidedScanRequest.requestToken)
-  }, [guidedScanRequest, leftDefaultPhaseCandidates.length, onConsumeGuidedScanRequest, onNotice, rightDefaultPhaseCandidates.length])
+  }, [
+    guidedScanRequest,
+    leftDefaultPhaseCandidates.length,
+    leftPendingDefaultPhaseCandidateCount,
+    onConsumeGuidedScanRequest,
+    onNotice,
+    rightDefaultPhaseCandidates.length,
+    rightPendingDefaultPhaseCandidateCount,
+  ])
 
   useEffect(() => {
     setSequenceLeftEvidenceKey(null)
@@ -2578,10 +2598,10 @@ function BoundaryActionComparison({
         <span>
           <strong>正在处理：{guidedIssueLabel}</strong>
           <small>{phaseCandidateScanSide
-            ? `已打开${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'} ${phaseCandidateScanSide === 'left' ? leftDefaultPhaseCandidates.length : rightDefaultPhaseCandidates.length} 个 ±2 帧合法候选。`
+            ? `已打开${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}；默认 ±2 帧内待处理 ${phaseCandidateScanSide === 'left' ? leftPendingDefaultPhaseCandidateCount : rightPendingDefaultPhaseCandidateCount} / 合法 ${phaseCandidateScanSide === 'left' ? leftDefaultPhaseCandidates.length : rightDefaultPhaseCandidates.length}。`
             : '当前两侧在 ±2 帧内都没有合法源窗口候选。'}</small>
         </span>
-        <small>只跳过没有合法候选的一侧；不排序、不推荐，也不会自动设置 B、播放或采用。</small>
+        <small>优先继续仍有待处理候选的一侧；两侧都已处理时仍保留合法候选供复看。不排序、不推荐，也不会自动设置 B、播放或采用。</small>
       </div>}
       {phaseCandidateScanSide && <>
         <div className={styles.boundaryPhaseReviewProgress} aria-label={`${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}邻帧候选对照进度`}>
