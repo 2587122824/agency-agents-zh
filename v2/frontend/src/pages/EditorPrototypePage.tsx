@@ -1770,6 +1770,20 @@ function BoundaryActionComparison({
   const shortlistedPhaseCandidateCount = phaseCandidateScanSide
     ? nearbyPhaseCandidates.filter(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)] === 'shortlisted').length
     : 0
+  const pendingPhaseCandidateForSide = (
+    side: 'left' | 'right',
+    candidates: Array<{ frameOffset: number; deltaMs: number }>,
+    excludedSourceKey?: string | null,
+  ) => {
+    const eligibleCandidates = candidates.filter(candidate => {
+      const sourceKey = candidateMotionSourceKey(side, candidate.deltaMs)
+      return sourceKey !== excludedSourceKey && candidateComparisonOutcomes[sourceKey] !== 'kept_baseline'
+    })
+    return eligibleCandidates.find(candidate => !candidateComparisonOutcomes[candidateMotionSourceKey(side, candidate.deltaMs)])
+      ?? eligibleCandidates.find(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(side, candidate.deltaMs)] === 'completed')
+      ?? eligibleCandidates.find(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(side, candidate.deltaMs)] === 'shortlisted')
+      ?? null
+  }
   const nextUnreviewedPhaseCandidate = phaseCandidateScanSide
     ? nearbyPhaseCandidates.find(candidate => !candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)]) ?? null
     : null
@@ -1781,9 +1795,20 @@ function BoundaryActionComparison({
     : null
   const nextReviewPhaseCandidate = nextUnreviewedPhaseCandidate ?? nextUndecidedPhaseCandidate ?? nextShortlistedPhaseCandidate
   const otherGuidedScanSide = phaseCandidateScanSide === 'left' ? 'right' : 'left'
+  const otherGuidedScanCandidates = otherGuidedScanSide === 'left' ? leftDefaultPhaseCandidates : rightDefaultPhaseCandidates
   const otherGuidedScanCandidateCount = phaseCandidateScanSide === 'left'
     ? rightPendingDefaultPhaseCandidateCount
     : leftPendingDefaultPhaseCandidateCount
+  const nextPhaseCandidateAfterDecision = phaseCandidateScanSide && activePhaseCandidateSourceKey
+    ? pendingPhaseCandidateForSide(phaseCandidateScanSide, nearbyPhaseCandidates, activePhaseCandidateSourceKey)
+    : null
+  const nextOtherGuidedPhaseCandidateAfterDecision = guidedIssueLabel && activePhaseCandidateSourceKey
+    ? pendingPhaseCandidateForSide(otherGuidedScanSide, otherGuidedScanCandidates)
+    : null
+  const candidateDecisionWillContinue = Boolean(
+    activePhaseCandidateSourceKey
+    && (nextPhaseCandidateAfterDecision || nextOtherGuidedPhaseCandidateAfterDecision),
+  )
   const phaseCandidateElementId = (side: 'left' | 'right', frameOffset: number) => `phase-candidate-${left.id}-${right.id}-${side}-${frameOffset}`
   const isPhaseCandidateSelected = (side: 'left' | 'right', deltaMs: number) => side === 'left'
     ? leftPhaseDeltaMs === deltaMs && rightPhaseDeltaMs === 0
@@ -2342,7 +2367,7 @@ function BoundaryActionComparison({
       : `已在本地试用 B ${type === 'fade' ? `${seconds(durationMs)} 淡出淡入` : '直接切换'}；可顺序试播或使用 A→B 连续对照。`)
   }
 
-  const resetPhase = () => {
+  const resetPhase = (announce = true) => {
     onBeforePlay()
     pauseMedia()
     cancelPhaseSequenceComparison()
@@ -2354,7 +2379,24 @@ function BoundaryActionComparison({
     setPhaseDecisionSourceKey(null)
     setPhaseView('baseline')
     setProgressMs(0)
-    onNotice(`已清除 ${left.label} → ${right.label} 的全部本地试调；草稿未改变。`)
+    if (announce) onNotice(`已清除 ${left.label} → ${right.label} 的全部本地试调；草稿未改变。`)
+  }
+
+  const continueCandidateReviewAfterDecision = (decisionLabel: string) => {
+    if (!phaseCandidateScanSide || !activePhaseCandidateSourceKey) return false
+    const nextSide = nextPhaseCandidateAfterDecision
+      ? phaseCandidateScanSide
+      : nextOtherGuidedPhaseCandidateAfterDecision ? otherGuidedScanSide : null
+    const nextCandidate = nextPhaseCandidateAfterDecision ?? nextOtherGuidedPhaseCandidateAfterDecision
+    if (!nextSide || !nextCandidate) return false
+    resetPhase(false)
+    if (nextSide !== phaseCandidateScanSide) {
+      setPhaseCandidateScanSide(nextSide)
+      setPhaseCandidateScanExpanded(false)
+    }
+    selectPhaseCandidate(nextSide, nextCandidate.deltaMs, true)
+    onNotice(`${decisionLabel}；已继续${nextSide === phaseCandidateScanSide ? '本侧' : `到${nextSide === 'left' ? '前镜' : '后镜'}`}下一个待处理候选，正在准备 A→B 对照。`)
+    return true
   }
 
   const showPhaseView = (view: 'baseline' | 'tuned') => {
@@ -2371,6 +2413,7 @@ function BoundaryActionComparison({
   const keepBaselinePhase = () => {
     if (phaseDecisionReady && activePhaseCandidateSourceKey) {
       onRememberCandidateComparisonOutcome(candidateReviewSessionKey, activePhaseCandidateSourceKey, 'kept_baseline')
+      if (continueCandidateReviewAfterDecision(`已保留 ${left.label} → ${right.label} 的 A 原切点，本次试调未写入草稿`)) return
     }
     resetPhase()
     onNotice(`已保留 ${left.label} → ${right.label} 的 A 原切点；本次试调未写入草稿。`)
@@ -2379,6 +2422,7 @@ function BoundaryActionComparison({
   const shortlistCandidatePhase = () => {
     if (!phaseDecisionReady || !activePhaseCandidateSourceKey) return
     onRememberCandidateComparisonOutcome(candidateReviewSessionKey, activePhaseCandidateSourceKey, 'shortlisted')
+    if (continueCandidateReviewAfterDecision(`已把 ${left.label} → ${right.label} 的当前 B 候选暂存为本页待复看`)) return
     resetPhase()
     onNotice(`已把 ${left.label} → ${right.label} 的当前 B 候选暂存为本页待复看；草稿未改变。`)
   }
@@ -2760,8 +2804,8 @@ function BoundaryActionComparison({
     {phaseDecisionReady && <div className={styles.boundaryPhaseDecision} role="group" aria-label="A/B 切点对照结论">
       <span><strong>选择这次对照结果</strong><small>保留 A 不写草稿；{tunedTrialSummary}</small></span>
       <div data-columns={activePhaseCandidateSourceKey ? 3 : 2}>
-        <button onClick={keepBaselinePhase}><RotateCcw />保留 A 原方案</button>
-        {activePhaseCandidateSourceKey && <button onClick={shortlistCandidatePhase}><Clock3 />暂存 B 待复看</button>}
+        <button onClick={keepBaselinePhase}><RotateCcw />保留 A 原方案{candidateDecisionWillContinue ? '并继续' : ''}</button>
+        {activePhaseCandidateSourceKey && <button onClick={shortlistCandidatePhase}><Clock3 />暂存 B 待复看{candidateDecisionWillContinue ? '并继续' : ''}</button>}
         <button
           disabled={editLocked || !viewingTunedPhase}
           title={editLocked ? '画面轨已锁定，只能比较或保留 A，不能采用 B。' : !viewingTunedPhase ? '请先切回 B 当前试调，确认要采用的画面。' : '把当前转场、滚动切位或全部非零相位试调作为一次操作写入草稿'}
@@ -2830,7 +2874,7 @@ function BoundaryActionComparison({
         onClick={phaseSequenceCompareStage !== 'idle' ? cancelPhaseSequenceComparison : startPhaseSequenceComparison}
       >{phaseSequenceCompareStage !== 'idle' ? <Pause /> : <Play />}{phaseSequenceCompareStage === 'baseline' ? '停止 A（1/2）' : phaseSequenceCompareStage === 'tuned' ? '停止 B（2/2）' : hasComparisonTrial && (!comparisonEvidenceReady || !sequenceLeftReady || !sequenceRightReady) ? '等待 A/B 证据' : 'A→B 连续对照'}</button>
       <button onClick={() => { pauseMedia(); cancelPhaseSequenceComparison(); positionMedia(); positionSequenceMedia() }}><RotateCcw />回到窗口开头</button>
-      <button disabled={!hasComparisonTrial} onClick={resetPhase}><RotateCcw />清除当前试调</button>
+      <button disabled={!hasComparisonTrial} onClick={() => resetPhase()}><RotateCcw />清除当前试调</button>
       <button
         disabled={editLocked || leftPhaseDeltaMs === 0 || rightPhaseDeltaMs === 0 || !viewingTunedPhase}
         title={editLocked
