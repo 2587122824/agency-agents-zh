@@ -3079,6 +3079,7 @@ export function EditorPrototypePage() {
     requestToken: number
   } | null>(null)
   const [boundaryCandidateReviewSessions, setBoundaryCandidateReviewSessions] = useState<Record<string, BoundaryCandidateReviewSession>>({})
+  const [editorDraftRestoreComplete, setEditorDraftRestoreComplete] = useState(false)
   const boundaryCandidateReviewSessionsRef = useRef<Record<string, BoundaryCandidateReviewSession>>({})
   const replaceBoundaryCandidateReviewSessions = useCallback((sessions: Record<string, BoundaryCandidateReviewSession>) => {
     boundaryCandidateReviewSessionsRef.current = sessions
@@ -3253,6 +3254,7 @@ export function EditorPrototypePage() {
     setBoundaryContinuityObservations({})
     setBoundaryContinuityReadyEvidence({})
     replaceBoundaryCandidateReviewSessions({})
+    setEditorDraftRestoreComplete(false)
     setBoundaryContinuityObservations({})
     setBoundaryContinuityReadyEvidence({})
     setDirty(false)
@@ -3402,6 +3404,7 @@ export function EditorPrototypePage() {
       : localRestored
         ? `已恢复 ${new Date(localRestored.saved_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 的本地草稿。`
         : '当前时间线已同步；开始调整后会自动保存到项目。')
+    setEditorDraftRestoreComplete(true)
   }, [sourceTimeline?.id, sourceTimeline?.row_version, localDraftKey, serverDraft.data, serverDraft.isPending])
 
   const durationMs = workspace.data?.duration_ms ?? 15000
@@ -3926,7 +3929,7 @@ export function EditorPrototypePage() {
   }, [comparisonItem?.id, comparisonItem?.asset_id, previewCompareMode, previewCompareMs])
 
   useEffect(() => {
-    if (!sourceTimeline || !dirty || !items.length || boundaryRollMonitor?.active) return
+    if (!editorDraftRestoreComplete || !sourceTimeline || !dirty || !items.length || boundaryRollMonitor?.active) return
     const draft: LocalEditorDraft = {
       schema_version: LOCAL_DRAFT_SCHEMA,
       base_timeline_id: sourceTimeline.id,
@@ -3942,7 +3945,7 @@ export function EditorPrototypePage() {
       saved_at: new Date().toISOString(),
     }
     window.localStorage.setItem(localDraftKey, JSON.stringify(draft))
-  }, [boundaryCandidateReviewSessions, boundaryContinuityIssueContexts, boundaryContinuityObservations, boundaryContinuityOutcomes, boundaryRollMonitor, dirty, items, localDraftKey, playheadMs, snapEnabled, sourceTimeline, timelineZoom])
+  }, [boundaryCandidateReviewSessions, boundaryContinuityIssueContexts, boundaryContinuityObservations, boundaryContinuityOutcomes, boundaryRollMonitor, dirty, editorDraftRestoreComplete, items, localDraftKey, playheadMs, snapEnabled, sourceTimeline, timelineZoom])
 
   const saveCurrentEditorDraft = async () => {
     if (!sourceTimeline) throw new Error('当前没有可保存的剪辑基线。')
@@ -3983,6 +3986,7 @@ export function EditorPrototypePage() {
   useEffect(() => {
     if (
       !sourceTimeline
+      || !editorDraftRestoreComplete
       || !dirty
       || !items.length
       || boundaryRollMonitor?.active
@@ -3997,6 +4001,7 @@ export function EditorPrototypePage() {
     return () => window.clearTimeout(timer)
   }, [
     dirty,
+    editorDraftRestoreComplete,
     items,
     playheadMs,
     snapEnabled,

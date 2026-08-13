@@ -613,6 +613,7 @@ v2/runtime/worker.err.log
 - 候选 session 不再由边界 effect 主动删除。素材、源窗、fps 或切点变化会形成新稳定 key，渲染和续办只读取当前精确 key，因此旧 session 只作为不可见审核记忆保留、不冒充当前证据；主动清理在 React 恢复时存在竞态，Browser 曾三次复现服务端 session `1 → 0`，会造成真实审核数据丢失，故取消该破坏性路径。
 - 同时移除页面态时代遗留的 `[items]` effect 中无条件 `replaceBoundaryCandidateReviewSessions({})`。草稿恢复必然更新 items，该路径会在每次刷新后清空刚恢复的会话；items 变化现在只关闭动作工具并清除临时观察 evidence，候选审核隔离完全由稳定 session key 负责。
 - 草稿恢复 effect 不再依赖整个 `workspace.data` 对象，只依赖稳定的 Timeline ID/row version、草稿 query 和本地 key。页面的项目列表周期刷新会产生新的 workspace 对象引用；旧依赖会反复执行恢复并在候选自动保存前后重放旧远端快照，造成 session 时序覆盖和多余 PUT。
+- localStorage 写入与 900ms API 自动保存均受 `editorDraftRestoreComplete` 门禁；项目切换/首屏初始化先置 false，远端/本地择优恢复全部字段后才置 true。否则恢复 state 批次渲染期间 `dirty` 与旧候选 session 可能错位，自动保存会在恢复完成前把空 session 写回服务端。
 - 恢复优先级收敛为权威远端草稿优先：只要服务端草稿与当前 Timeline 基线匹配，就不允许 localStorage 以时间戳覆盖；本地草稿只在没有匹配远端草稿时兜底。候选结论保存后刷新曾复现服务端 session `1 → 0`，根因就是页面选中较新的旧本地空 session 并自动回写；不再依赖客户端/SQLite 跨时区时间比较来决定权威性。
 
 ## 9. 下一步
