@@ -684,4 +684,5 @@ Alembic 修订：`20260716_09`。
 - `candidateReviewSessionsLoadedRef` 在候选字段恢复/真实登记前阻断 `saveCurrentEditorDraft`，初始空 ref 不允许写 API。
 - 恢复时同步写 session ref 再 setState；保存函数读取 ref，避免旧 render 闭包发送空 session。
 - 远端草稿恢复后 dirty=false；只有本地兜底恢复置脏并上传，首次读取零 PUT。
+- `suppressDraftWritesRef` 从 reset 到恢复后下一 macrotask 阻断所有草稿写 effect，覆盖旧 dirty 闭包。
 - 只要远端草稿与当前 Timeline 基线匹配就始终优先；localStorage 仅在无匹配远端草稿时兜底，不能按客户端时间覆盖权威候选审核。

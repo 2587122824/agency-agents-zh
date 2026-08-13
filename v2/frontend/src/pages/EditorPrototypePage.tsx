@@ -3080,6 +3080,7 @@ export function EditorPrototypePage() {
   } | null>(null)
   const [boundaryCandidateReviewSessions, setBoundaryCandidateReviewSessions] = useState<Record<string, BoundaryCandidateReviewSession>>({})
   const candidateReviewSessionsLoadedRef = useRef(false)
+  const suppressDraftWritesRef = useRef(false)
   const boundaryCandidateReviewSessionsRef = useRef<Record<string, BoundaryCandidateReviewSession>>({})
   const replaceBoundaryCandidateReviewSessions = useCallback((sessions: Record<string, BoundaryCandidateReviewSession>) => {
     boundaryCandidateReviewSessionsRef.current = sessions
@@ -3238,6 +3239,7 @@ export function EditorPrototypePage() {
     resetProjectIdRef.current = projectId
     restoredDraftIdentityRef.current = null
     candidateReviewSessionsLoadedRef.current = false
+    suppressDraftWritesRef.current = true
     setItems([])
     setHistory([])
     setFuture([])
@@ -3385,6 +3387,7 @@ export function EditorPrototypePage() {
     boundaryCandidateReviewSessionsRef.current = mergedCandidateReviewSessions
     setBoundaryCandidateReviewSessions(mergedCandidateReviewSessions)
     candidateReviewSessionsLoadedRef.current = true
+    window.setTimeout(() => { suppressDraftWritesRef.current = false }, 0)
     setBoundaryContinuityReadyEvidence({})
     setDirty(Boolean(localRestored && !useRemote))
     setLastAutoSavedAt(useRemote && remote ? remote.updated_at : null)
@@ -3953,7 +3956,7 @@ export function EditorPrototypePage() {
   }, [comparisonItem?.id, comparisonItem?.asset_id, previewCompareMode, previewCompareMs])
 
   useEffect(() => {
-    if (!sourceTimeline || !dirty || !items.length || boundaryRollMonitor?.active) return
+    if (suppressDraftWritesRef.current || !sourceTimeline || !dirty || !items.length || boundaryRollMonitor?.active) return
     const draft: LocalEditorDraft = {
       schema_version: LOCAL_DRAFT_SCHEMA,
       base_timeline_id: sourceTimeline.id,
@@ -4013,6 +4016,7 @@ export function EditorPrototypePage() {
   useEffect(() => {
     if (
       !sourceTimeline
+      || suppressDraftWritesRef.current
       || !dirty
       || !items.length
       || boundaryRollMonitor?.active
