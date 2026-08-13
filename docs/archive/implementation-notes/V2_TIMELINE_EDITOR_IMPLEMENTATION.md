@@ -695,3 +695,4 @@ Alembic 修订：`20260716_09`。
 - 发布 `0192a4a2`：完整后端 `306 passed in 185.53s`，compileall、Vite `/assets/index-ClLmzjZ8.js`、diff check 通过；最终 API `52712` / Worker `50780`、Alembic `20260813_50`、draft null、四日志零错误。
 - 草稿合同升级 `editor-draft-session.v9 / editor-local-draft.v12`，迁移 `20260813_51` 重建开发候选 session。`alternative_outcomes` 追加保存续办区滚动/转场完整对照后的 `kept_baseline`；已排除按钮跨刷新隐藏，全部排除后转入素材/镜头结构处理，普通临时试调不登记。
 - 发布 `f6906d39`：完整后端 `306 passed in 190.87s`，compileall、Vite `/assets/index-BDgajzuP.js`、diff check 通过；最终 API `39756` / Worker `15780`、Alembic `20260813_51`、draft null、四日志零错误。
+- 同步动作区完成渐进式收纳：`evidenceDetailsOpen / candidateDetailsOpen / advancedTrialsOpen` 只作为组件页面态。默认主卡呈现问题、进度和单一下一步；详细像素/动作证据、候选列表和高级试调分层展开。引导任务打开候选，B 产生后候选自动收起并打开高级区，结论卡保持一级可见。收纳不改变 source-key 证据、A→B 状态机、候选/替代审核记忆或草稿合同。

@@ -1116,6 +1116,39 @@
 .boundaryActionComparison > header strong { color: #d8e5df; }
 .boundaryActionComparison > header small { color: #82928c; }
 .boundaryActionComparison > header code { color: #a9c7ba; white-space: nowrap; }
+.boundaryPrimaryTask {
+  min-width: 0;
+  padding: 7px;
+  display: grid;
+  gap: 6px;
+  border: 1px solid #567566;
+  border-radius: 5px;
+  background: #17231e;
+}
+.boundaryPrimaryTask > span { min-width: 0; display: grid; gap: 2px; }
+.boundaryPrimaryTask strong { color: #e1ebe6; line-height: 1.35; }
+.boundaryPrimaryTask small { color: #91a198; line-height: 1.35; overflow-wrap: anywhere; }
+.boundaryControl .boundaryPrimaryTask > button { width: 100%; min-width: 0; height: 30px; border-color: #628b77; background: #29483a; color: #edf8f2; }
+.boundaryDisclosureButton {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 7px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+}
+.boundaryDisclosureButton > span { min-width: 0; display: grid; gap: 1px; }
+.boundaryDisclosureButton strong { color: #cbd7d1; }
+.boundaryDisclosureButton small { overflow: hidden; color: #7f8e87; text-overflow: ellipsis; white-space: nowrap; }
+.boundaryDisclosureButton > b { color: #9db1a8; font-size: 9px; font-weight: 500; }
+.boundaryEvidenceDetails,
+.boundaryAdvancedTrials { min-width: 0; display: grid; gap: 7px; }
+.boundaryEvidenceDetails[data-open="false"],
+.boundaryAdvancedTrials[data-open="false"] { display: none; }
+.boundaryActionComparison > .boundaryEvidenceDetails > .boundaryABPixelEvidence,
+.boundaryActionComparison > .boundaryEvidenceDetails > .boundaryMotionEvidence { min-width: 0; }
 .boundaryPhaseViewSwitch {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1131,7 +1164,7 @@
   background: #29483c;
   color: #e0f0e9;
 }
-.boundaryActionComparison > .boundaryABPixelEvidence {
+.boundaryEvidenceDetails > .boundaryABPixelEvidence {
   min-width: 0;
   padding: 6px;
   display: grid;
@@ -1225,7 +1258,7 @@
 }
 .boundaryABPixelDelta b { color: #87978f; font-weight: 500; }
 .boundaryABPixelDelta code { color: #d1ddd7; white-space: nowrap; }
-.boundaryActionComparison > .boundaryMotionEvidence {
+.boundaryEvidenceDetails > .boundaryMotionEvidence {
   min-width: 0;
   padding: 6px;
   display: grid;
@@ -1562,6 +1595,7 @@
   border-radius: 5px;
   background: #12191d;
 }
+.boundaryActionComparison > .boundaryPhaseScan[data-open="false"] { display: none; }
 .boundaryPhaseScan > header {
   min-width: 0;
   display: grid;
@@ -1672,7 +1706,7 @@
   pointer-events: none;
 }
 .boundaryActionComparison .boundaryPixelProbeMedia video { width: 1px; height: 1px; }
-.boundaryActionComparison > .boundaryRollTrial {
+.boundaryAdvancedTrials > .boundaryRollTrial {
   padding: 6px;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -1681,7 +1715,7 @@
   border-radius: 5px;
   background: #151c19;
 }
-.boundaryActionComparison > .boundaryTransitionTrial {
+.boundaryAdvancedTrials > .boundaryTransitionTrial {
   padding: 6px;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -1706,13 +1740,14 @@
 }
 .boundaryControl .boundaryRollTrial button { min-width: 0; height: 25px; padding: 0 2px; font-size: 9px; }
 .boundaryRollTrial code { color: #a9c7ba; text-align: center; white-space: nowrap; }
-.boundaryActionComparison > div {
+.boundaryAdvancedTrials > div:not(.boundaryRollTrial):not(.boundaryTransitionTrial):not(.boundarySequencePreview),
+.boundaryActionComparison > div:not(.boundaryEvidenceDetails):not(.boundaryAdvancedTrials) {
   min-width: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 5px;
 }
-.boundaryActionComparison > .boundarySequencePreview {
+.boundaryAdvancedTrials > .boundarySequencePreview {
   position: relative;
   height: 108px;
   display: block;
@@ -1721,7 +1756,7 @@
   border-radius: 5px;
   background: #050606;
 }
-.boundaryActionComparison > .boundarySequencePreview[data-open="false"] { display: none; }
+.boundaryAdvancedTrials > .boundarySequencePreview[data-open="false"] { display: none; }
 .boundarySequencePreview video {
   position: absolute;
   inset: 0;
@@ -1806,10 +1841,10 @@
 .boundaryActionPhase > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px; }
 .boundaryControl .boundaryActionPhase button { min-width: 0; height: 24px; padding: 0 3px; font-size: 9px; }
 .boundaryControl .boundaryActionPhase > button:last-child { height: 26px; font-size: 10px; }
-.boundaryActionComparison > footer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
-.boundaryControl .boundaryActionComparison > footer button { height: 28px; }
-.boundaryActionComparison > footer button:last-child { grid-column: 1 / -1; }
-.boundaryActionComparison > small { color: #81908a; line-height: 1.45; }
+.boundaryAdvancedTrials > footer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.boundaryControl .boundaryAdvancedTrials > footer button { height: 28px; }
+.boundaryAdvancedTrials > footer button:last-child { grid-column: 1 / -1; }
+.boundaryAdvancedTrials > small { color: #81908a; line-height: 1.45; }
 .boundaryFrameStrip {
   min-width: 0;
   display: grid;

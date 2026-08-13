@@ -1634,6 +1634,9 @@ function BoundaryActionComparison({
   const [guidedIssueLabel, setGuidedIssueLabel] = useState<string | null>(null)
   const [alternativeReviewTrialKey, setAlternativeReviewTrialKey] = useState<string | null>(null)
   const [pendingPhaseCandidateCompare, setPendingPhaseCandidateCompare] = useState<{ side: 'left' | 'right'; deltaMs: number } | null>(null)
+  const [evidenceDetailsOpen, setEvidenceDetailsOpen] = useState(false)
+  const [candidateDetailsOpen, setCandidateDetailsOpen] = useState(false)
+  const [advancedTrialsOpen, setAdvancedTrialsOpen] = useState(false)
   const leftBaseSourceInMs = left.source_in_ms ?? 0
   const leftBaseSourceOutMs = left.source_out_ms ?? leftBaseSourceInMs
   const rightBaseSourceInMs = right.source_in_ms ?? 0
@@ -2021,6 +2024,7 @@ function BoundaryActionComparison({
 
   useEffect(() => {
     if (!guidedScanRequest) return
+    setCandidateDetailsOpen(true)
     if (guidedScanRequest.intent === 'resume') {
       const resumableCandidate = (side: 'left' | 'right') => legalPhaseCandidatesForSide(side, allPhaseCandidateFrameOffsets)
         .find(candidate => {
@@ -2549,15 +2553,42 @@ function BoundaryActionComparison({
     ? boundaryMotionDeltas(baselineMotionAnalysis, tunedMotionAnalysis)
     : null
 
+  useEffect(() => {
+    if (hasComparisonTrial) {
+      setAdvancedTrialsOpen(true)
+      setCandidateDetailsOpen(false)
+    }
+  }, [hasComparisonTrial])
+
   return <section className={styles.boundaryActionComparison} aria-label={`${left.label} 到 ${right.label} 的同步动作对比`}>
     <header>
       <span><strong>同步动作</strong><small>{viewingTunedPhase ? 'B 当前试调' : 'A 原方案'} · 共同窗口 {previewSeconds(comparisonDurationMs)} · {rate}×</small></span>
       <code>{timecode(progressMs, fps)} / {timecode(comparisonDurationMs, fps)}</code>
     </header>
+    <section className={styles.boundaryPrimaryTask} aria-label="当前同步动作任务">
+      <span>
+        <strong>{phaseDecisionReady ? '对照已完成，请选择结果' : hasComparisonTrial ? 'B 已准备，下一步完成 A→B 对照' : guidedIssueLabel ? `正在处理：${guidedIssueLabel}` : '先检查最接近切点的邻帧'}</strong>
+        <small>{phaseCandidateScanSide
+          ? `${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}已对照 ${reviewedPhaseCandidateCount}/${nearbyPhaseCandidates.length}${undecidedPhaseCandidateCount ? ` · 待决定 ${undecidedPhaseCandidateCount}` : ''}`
+          : hasComparisonTrial ? tunedTrialSummary : '只在你打开后加载候选；系统不排序、不推荐，也不会自动设置 B。'}</small>
+      </span>
+      {!hasComparisonTrial && !phaseDecisionReady && <button type="button" onClick={() => setCandidateDetailsOpen(value => !value)}>
+        {candidateDetailsOpen ? '收起候选' : phaseCandidateScanSide ? '继续候选审核' : '检查邻帧候选'}
+      </button>}
+      {hasComparisonTrial && !phaseDecisionReady && <button
+        type="button"
+        disabled={phaseSequenceCompareStage === 'idle' && (!comparisonEvidenceReady || sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady)}
+        onClick={phaseSequenceCompareStage !== 'idle' ? cancelPhaseSequenceComparison : startPhaseSequenceComparison}
+      >{phaseSequenceCompareStage === 'baseline' ? '停止 A（1/2）' : phaseSequenceCompareStage === 'tuned' ? '停止 B（2/2）' : comparisonEvidenceReady && sequenceLeftReady && sequenceRightReady ? '开始 A→B 对照' : '正在准备证据'}</button>}
+    </section>
     <div className={styles.boundaryPhaseViewSwitch} role="group" aria-label="同步动作切点 A/B 对照">
       <button aria-pressed={!viewingTunedPhase} onClick={() => showPhaseView('baseline')}>A 原方案</button>
       <button aria-pressed={viewingTunedPhase} disabled={!hasComparisonTrial} title={hasComparisonTrial ? '查看当前保留的试调' : '先试调转场、滚动切位或前后镜相位'} onClick={() => showPhaseView('tuned')}>B 当前试调</button>
     </div>
+    <button type="button" className={styles.boundaryDisclosureButton} aria-expanded={evidenceDetailsOpen} onClick={() => setEvidenceDetailsOpen(value => !value)}>
+      <span><strong>详细动作证据</strong><small>像素、局部幅度、九宫格与重心轨迹</small></span><b>{evidenceDetailsOpen ? '收起' : '查看'}</b>
+    </button>
+    <div className={styles.boundaryEvidenceDetails} data-open={evidenceDetailsOpen} aria-hidden={!evidenceDetailsOpen}>
     <section className={styles.boundaryABPixelEvidence} aria-label="A/B 切点像素证据">
       <header>
         <span><strong>切点像素证据</strong><small>同时比较末帧与首帧；数值只辅助人工判断，不自动给出好坏结论。</small></span>
@@ -2705,7 +2736,8 @@ function BoundaryActionComparison({
         <small>正负只表示 B 相对 A 的数值变化方向，不代表当前试调更好或更差。</small>
       </section>}
     </section>
-    <section className={styles.boundaryPhaseScan} aria-label="单侧邻帧候选扫描">
+    </div>
+    <section className={styles.boundaryPhaseScan} data-open={candidateDetailsOpen} aria-label="单侧邻帧候选扫描">
       <header>
         <span><strong>邻帧候选扫描</strong><small>{phaseCandidateScanExpanded ? '已显式扩展到前后 4 帧' : '默认读取前后 2 帧，可按需扩展到 4 帧'}；不排序、不推荐，选择后才成为本地 B。</small></span>
         <div role="group" aria-label="选择邻帧扫描侧">
@@ -2721,7 +2753,7 @@ function BoundaryActionComparison({
           >后镜</button>
         </div>
       </header>
-      {guidedIssueLabel && <div className={styles.boundaryPhaseGuidance} role="status">
+      {candidateDetailsOpen && guidedIssueLabel && <div className={styles.boundaryPhaseGuidance} role="status">
         <span>
           <strong>正在处理：{guidedIssueLabel}</strong>
           <small>{phaseCandidateScanSide
@@ -2730,7 +2762,7 @@ function BoundaryActionComparison({
         </span>
         <small>优先继续仍有待处理候选的一侧；两侧都已处理时仍保留合法候选供复看。不排序、不推荐，也不会自动设置 B、播放或采用。</small>
       </div>}
-      {phaseCandidateScanSide && <>
+      {candidateDetailsOpen && phaseCandidateScanSide && <>
         <div className={styles.boundaryPhaseReviewProgress} aria-label={`${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}邻帧候选对照进度`}>
           <span>
             <strong>{reviewedPhaseCandidateCount}/{nearbyPhaseCandidates.length} 已对照{undecidedPhaseCandidateCount > 0 ? ` · 待决定 ${undecidedPhaseCandidateCount}` : ''}</strong>
@@ -2811,7 +2843,7 @@ function BoundaryActionComparison({
           }) : <small>这一侧在当前素材把手内没有可扫描的邻近相位。</small>}
         </div>
       </>}
-      {!phaseCandidateScanSide && <small>选择前镜或后镜后再按需加载候选，不会后台扫描整段素材。</small>}
+      {candidateDetailsOpen && !phaseCandidateScanSide && <small>选择前镜或后镜后再按需加载候选，不会后台扫描整段素材。</small>}
     </section>
     {phaseCandidateReviewExhausted && !hasComparisonTrial && <section
       className={styles.boundaryCandidateExhaustedNext}
@@ -2838,6 +2870,10 @@ function BoundaryActionComparison({
         ? `其他 ${exhaustedCandidateAlternatives.length} 项合法原子试调也已完整对照并保留 A；请回到素材或镜头结构处理。`
         : '当前源窗和转场合同没有可用的下一类无损试调；请回到素材或镜头结构处理。'}</small>}
     </section>}
+    <button type="button" className={styles.boundaryDisclosureButton} aria-expanded={advancedTrialsOpen} onClick={() => setAdvancedTrialsOpen(value => !value)}>
+      <span><strong>其他无损试调</strong><small>转场、滚动切位、双方相位与分析播放</small></span><b>{advancedTrialsOpen ? '收起' : '展开'}</b>
+    </button>
+    <div className={styles.boundaryAdvancedTrials} data-open={advancedTrialsOpen} aria-hidden={!advancedTrialsOpen}>
     <div className={styles.boundaryTransitionTrial}>
       <span><strong>转场无损试用</strong><small>A 为当前 {baselineTransitionLabel}；B 在顺序舞台真实显示淡出至黑场再淡入，不是交叉叠化。</small></span>
       <div>
@@ -2909,6 +2945,7 @@ function BoundaryActionComparison({
       />
       <span><strong>{sequenceSide === 'left' ? left.label : right.label}</strong><small>{sequenceSide === 'left' ? '切前' : '切后'} · {viewingTunedPhase ? 'B 当前试调' : 'A 原方案'}{phaseSequenceCompareStage !== 'idle' ? ` · ${phaseSequenceCompareStage === 'baseline' ? '1/2' : '2/2'}` : ''}</small><code>{timecode(sequenceProgressMs, fps)} / {timecode(sequenceDurationMs, fps)}</code></span>
     </div>
+    </div>
     {phaseDecisionReady && <div className={styles.boundaryPhaseDecision} role="group" aria-label="A/B 切点对照结论">
       <span><strong>选择这次对照结果</strong><small>保留 A 不写草稿；{tunedTrialSummary}</small></span>
       <div data-columns={activePhaseCandidateSourceKey ? 3 : 2}>
@@ -2921,6 +2958,7 @@ function BoundaryActionComparison({
         ><CheckCircle2 />采用 B 当前试调</button>
       </div>
     </div>}
+    <div className={styles.boundaryAdvancedTrials} data-open={advancedTrialsOpen} aria-hidden={!advancedTrialsOpen}>
     <div>
       <figure>
         <video
@@ -2996,6 +3034,7 @@ function BoundaryActionComparison({
       >应用双方相位</button>
     </footer>
     <small>同步播放用于并排看动作阶段；顺序试播会在同一黑色舞台播放前镜再切后镜，并真实消费当前 A/B 的淡出淡入透明度。只有 A 原方案在 1× 下看完切点两侧各最多 1 秒的完整可用上下文，才计入通过证据；慢放或更短窗口只用于分析。转场、滚动切位与源窗口相位均可先无损试调，再用 A→B 连续对照和明确结论决定是否写入；三类试调互斥。该会话不写草稿，也不包含音频或字幕。切回 A 不会丢失试调值；只有正在查看 B 时才能采用。锁轨时仍可试播，但不能采用。</small>
+    </div>
   </section>
 }
 
