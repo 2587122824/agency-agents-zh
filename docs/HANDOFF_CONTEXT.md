@@ -601,6 +601,7 @@ v2/runtime/worker.err.log
 - 提交 `94cc00f4` 已发布上述一次完整缺口修复并推送到 `main`。标准重启后的正式服务为 API `38004` / Worker `14376`，创建时间 `2026-08-11 20:56:39.281 / 20:56:39.299`；健康 `ok`、Alembic runtime/head `20260811_49`、四份日志零实际错误。最终只读 Browser 仍精确显示完整修复预案，保持 Timeline v12、播放头 `00:00:00`、html/body `1280/1280`、Inspector `244/244` 且页面 warning/error 日志为空；项目 editor draft 为 `null`，最终服务周期 editor-draft PUT 为 `0`。
 - 动作类“需调整”已接入问题驱动邻帧候选引导：单项处理或全局待办命中 motion 时，页面按当前源窗自动打开默认 `±2` 中第一个确有合法候选的侧，前镜为空会直接跳到后镜；两侧为空明确说明。引导显示原问题、当前侧和候选数，本侧处理完且另一侧有默认候选时提供继续检查；不按像素/动作指标排序或推荐，不自动设置 B、播放或采用。frames/overlay、普通观察、候选记忆续办和 outcome 已重置的 recheck 不触发。状态仅在当前页面组件会话，不改草稿 schema、API、Timeline、迁移、history 或 FFmpeg。
 - 真实咖啡 v12 的 SH-002→SH-001 动作正例自动跳过源窗用满的 SH-002，打开 SH-001 后镜 `+1/+2` 两个候选；初始无 B、所有媒体暂停。手动对照首个候选仍完整走 A→B 并进入待决定，选择保留 A 后没有剪辑写入。主体并排反例只打开并排，action/scan region 均为 0。验收草稿已丢弃，播放头 0、服务端 draft null；1280×720 html/body `1280/1280`、Inspector `244/244`、页面 warning/error 为空。Vite build、Python compileall、diff check 与隔离外部执行开关后的完整后端 `305 passed in 306.66s` 通过；首次未隔离运行仅因正式环境启用 RunningHub 与默认关闭断言冲突，304 项通过，针对用例和完整复跑均已通过，正式服务授权没有被修改。
+- 提交 `cfa6fd49` 已发布上述动作问题驱动候选引导并推送到 `main`。重启后正式 Browser 再次证明后镜两个候选自动打开、前镜未选、无 B、媒体全暂停，Timeline v12、1280×720 html/body `1280/1280`、Inspector `244/244`、播放头 0 与空页面日志均正确；验收草稿已丢弃。关闭验收媒体连接在 Windows asyncio 留下两条 `WinError 10054` 回调后，为恢复发布日志基线再次执行标准重启，最终 API `49916` / Worker `40472`，创建时间均为 `2026-08-13 14:32:30`；8766 监听 PID 精确等于 API PID，健康 `ok`、Alembic runtime/head `20260811_49`、四份日志零实际错误、项目 draft null。该断连日志不属于产品失败，最终服务周期不再打开媒体页面。
 
 ## 9. 下一步
 
