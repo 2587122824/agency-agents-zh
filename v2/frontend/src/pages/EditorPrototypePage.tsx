@@ -3079,6 +3079,7 @@ export function EditorPrototypePage() {
     requestToken: number
   } | null>(null)
   const [boundaryCandidateReviewSessions, setBoundaryCandidateReviewSessions] = useState<Record<string, BoundaryCandidateReviewSession>>({})
+  const candidateReviewSessionsLoadedRef = useRef(false)
   const boundaryCandidateReviewSessionsRef = useRef<Record<string, BoundaryCandidateReviewSession>>({})
   const replaceBoundaryCandidateReviewSessions = useCallback((sessions: Record<string, BoundaryCandidateReviewSession>) => {
     boundaryCandidateReviewSessionsRef.current = sessions
@@ -3089,6 +3090,7 @@ export function EditorPrototypePage() {
     sourceKey: string,
     analysis: BoundaryMotionAnalysis,
   ) => {
+    candidateReviewSessionsLoadedRef.current = true
     const current = boundaryCandidateReviewSessionsRef.current
     const session = current[sessionKey] ?? EMPTY_BOUNDARY_CANDIDATE_REVIEW_SESSION
     if (JSON.stringify(session.measuredMotionEvidence[sourceKey]) === JSON.stringify(analysis)) return
@@ -3106,6 +3108,7 @@ export function EditorPrototypePage() {
     sourceKey: string,
     outcome: BoundaryCandidateComparisonOutcome,
   ) => {
+    candidateReviewSessionsLoadedRef.current = true
     const current = boundaryCandidateReviewSessionsRef.current
     const session = current[sessionKey] ?? EMPTY_BOUNDARY_CANDIDATE_REVIEW_SESSION
     if (session.comparisonOutcomes[sourceKey] === outcome) return
@@ -3234,6 +3237,7 @@ export function EditorPrototypePage() {
     if (resetProjectIdRef.current === projectId) return
     resetProjectIdRef.current = projectId
     restoredDraftIdentityRef.current = null
+    candidateReviewSessionsLoadedRef.current = false
     setItems([])
     setHistory([])
     setFuture([])
@@ -3375,11 +3379,11 @@ export function EditorPrototypePage() {
     setBoundaryContinuityOutcomes(restoredContinuityOutcomes)
     setBoundaryContinuityIssueContexts(restoredContinuityIssueContexts)
     setBoundaryContinuityObservations(restoredContinuityObservations)
-    const mergedCandidateReviewSessions = {
-      ...restoredCandidateReviewSessions,
-      ...boundaryCandidateReviewSessionsRef.current,
-    }
+    const mergedCandidateReviewSessions = candidateReviewSessionsLoadedRef.current
+      ? { ...restoredCandidateReviewSessions, ...boundaryCandidateReviewSessionsRef.current }
+      : restoredCandidateReviewSessions
     replaceBoundaryCandidateReviewSessions(mergedCandidateReviewSessions)
+    candidateReviewSessionsLoadedRef.current = true
     setBoundaryContinuityReadyEvidence({})
     setDirty(Boolean(remoteItems || localRestored))
     setLastAutoSavedAt(useRemote && remote ? remote.updated_at : null)
@@ -3968,6 +3972,9 @@ export function EditorPrototypePage() {
 
   const saveCurrentEditorDraft = async () => {
     if (!sourceTimeline) throw new Error('当前没有可保存的剪辑基线。')
+    if (!candidateReviewSessionsLoadedRef.current) {
+      throw new Error('候选审核进度仍在恢复，暂不能保存草稿。')
+    }
     return api.saveEditorDraft(projectId, sourceTimeline, {
       ...sourceTimeline.track_config,
       audio_enabled: audioItems.length > 0,
