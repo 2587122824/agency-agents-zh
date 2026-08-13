@@ -3402,7 +3402,7 @@ export function EditorPrototypePage() {
       : localRestored
         ? `已恢复 ${new Date(localRestored.saved_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 的本地草稿。`
         : '当前时间线已同步；开始调整后会自动保存到项目。')
-  }, [sourceTimeline?.id, sourceTimeline?.row_version, localDraftKey, serverDraft.data, serverDraft.isPending, workspace.data])
+  }, [sourceTimeline?.id, sourceTimeline?.row_version, localDraftKey, serverDraft.data, serverDraft.isPending])
 
   const durationMs = workspace.data?.duration_ms ?? 15000
   const outputFps = Math.max(1, Number(sourceTimeline?.output_spec.fps) || 24)
