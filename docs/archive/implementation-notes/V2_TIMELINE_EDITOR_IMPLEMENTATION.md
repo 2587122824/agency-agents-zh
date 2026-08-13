@@ -687,4 +687,5 @@ Alembic 修订：`20260716_09`。
 - `suppressDraftWritesRef` 从 reset 到恢复后下一 macrotask 阻断所有草稿写 effect，覆盖旧 dirty 闭包。
 - 服务端更新按 session/exact key 追加合并候选审核；空 payload 不删除，重测同 key 可覆盖，草稿 DELETE 才整体清除。
 - 前端恢复按 session 内两张 exact-key map 深合并，禁止空 session 壳覆盖远端记录。
+- 最终发布验收：完整后端 `306 passed in 147.71s`，生产 bundle `/assets/index-Csf6vzQ9.js`；真实 v12 对照保存后服务端 session 在刷新前后均为 1，UI 恢复 `2/2 / 保留 A 1 / 待决定 1`，但刷新不恢复 B、扫描或播放。清理后 draft null；最终 API `50644` / Worker `38820`、Alembic `20260813_50`、四日志零错误。
 - 只要远端草稿与当前 Timeline 基线匹配就始终优先；localStorage 仅在无匹配远端草稿时兜底，不能按客户端时间覆盖权威候选审核。

@@ -624,6 +624,7 @@ v2/runtime/worker.err.log
 - 服务端把候选审核定义为草稿内追加式审计记忆：更新草稿时按 session key、再按 exact source key 合并 `measured_motion_evidence / comparison_outcomes`，传空对象或迟到标签页保存不能删除既有记录；同 exact key 的新一轮实测/人工结论可覆盖旧值。删除候选审核只通过丢弃整个草稿，普通保存没有破坏性删除语义。
 - 前端恢复也按 session 内的 `measuredMotionEvidence / comparisonOutcomes` 两张 exact-key map 深合并，不能让内存中同 session key 的空壳整体覆盖远端完整 session；远端记录保底，当前同 exact key 的新实测/结论优先。
 - 候选卡的人工作业提示同步改为“已保存到项目草稿”，不再沿用页面态时期“仅保留在本页”的错误文案；B 相位/滚动/转场试调本身仍保持不写草稿，只有候选审核证据和人工结果持久化。
+- 发布提交从 `ccbbff1c` 完成 v8/v11 合同，后续 Browser 逐层修正入口缓存、恢复 effect 与追加合并，最终 `537da800` 深合并前端 session、`644d96e4` 服务端追加合并、`f83d5077` 修正文案，均已推送 `main`。完整后端现为 `306 passed in 147.71s`，Vite 最终构建 `/assets/index-Csf6vzQ9.js`，Python compileall、迁移测试和 diff check 通过。真实咖啡 v12 完整对照后服务端 session=1；刷新后仍为 1，展开精确恢复 `2/2 已对照 / 保留 A 1 / 待决定 1`，刷新前无 B、无扫描、全部媒体暂停。验收草稿已丢弃，恢复 Timeline v12、播放头 0、draft null、1280×720 html/body `1280/1280`、页面 warning/error 为空。关闭页面后再次标准重启，最终 API `50644` / Worker `38820`，创建时间均为 `2026-08-13 16:42:21`；健康 `ok`、Alembic runtime/head `20260813_50`、四日志零实际错误。
 - 恢复优先级收敛为权威远端草稿优先：只要服务端草稿与当前 Timeline 基线匹配，就不允许 localStorage 以时间戳覆盖；本地草稿只在没有匹配远端草稿时兜底。候选结论保存后刷新曾复现服务端 session `1 → 0`，根因就是页面选中较新的旧本地空 session 并自动回写；不再依赖客户端/SQLite 跨时区时间比较来决定权威性。
 
 ## 9. 下一步
