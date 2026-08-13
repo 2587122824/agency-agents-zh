@@ -263,10 +263,6 @@ function canonicalDraftValue(value: unknown): unknown {
     .map(([key, child]) => [key, canonicalDraftValue(child)]))
 }
 
-function serverTimestampMs(value: string) {
-  return Date.parse(/[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`)
-}
-
 function editorDraftFingerprint(
   sourceTimeline: Timeline | null,
   items: TimelineItem[],
@@ -3349,28 +3345,7 @@ export function EditorPrototypePage() {
         remoteCandidateReviewSessions,
       )
       : null
-    const localFingerprint = localRestored
-      ? editorDraftFingerprint(
-        sourceTimeline,
-        localRestored.items,
-        localRestored.playhead_ms,
-        localRestored.snap_enabled,
-        localRestored.timeline_zoom,
-        localRestored.boundary_continuity_outcomes,
-        localRestored.boundary_continuity_issue_contexts,
-        localRestored.boundary_continuity_observations,
-        localRestored.boundary_candidate_review_sessions,
-      )
-      : null
-    const localMatchesRemote = Boolean(remoteFingerprint && localFingerprint === remoteFingerprint)
-    const useRemote = Boolean(
-      remoteMatches
-      && (
-        !localRestored
-        || localMatchesRemote
-        || serverTimestampMs(remote!.updated_at) >= Date.parse(localRestored.saved_at)
-      )
-    )
+    const useRemote = remoteMatches
     const restoredItems = useRemote && remoteItems
       ? remoteItems
       : localRestored?.items ?? sourceTimeline.items
