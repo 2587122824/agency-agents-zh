@@ -677,5 +677,5 @@ Alembic 修订：`20260716_09`。
 - 不主动删除旧候选 session；当前边界只读取精确稳定 key，旧 key 保留为不可见审计记忆。主动清理会因恢复 effect 时序把权威 session 回写为空。
 - 删除 `[items]` effect 的候选 session 全量清空；items 恢复或结构变化仍关闭当前动作工具，但不会删除父级审核记忆。
 - 恢复 effect 不依赖 `workspace.data` 整体对象，避免项目列表/工作区刷新反复重跑恢复并覆盖候选 state。
-- localStorage 与 API autosave 必须等待 `editorDraftRestoreComplete`，禁止保存恢复批次的中间空 session。
+- localStorage 与 API autosave 读取同步 `editorDraftRestoreCompleteRef`；不要用异步 state 门禁两个同轮恢复 effect。
 - 只要远端草稿与当前 Timeline 基线匹配就始终优先；localStorage 仅在无匹配远端草稿时兜底，不能按客户端时间覆盖权威候选审核。
