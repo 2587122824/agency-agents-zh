@@ -691,3 +691,4 @@ Alembic 修订：`20260716_09`。
 - 只要远端草稿与当前 Timeline 基线匹配就始终优先；localStorage 仅在无匹配远端草稿时兜底，不能按客户端时间覆盖权威候选审核。
 - 候选继续入口新增瞬时 `resume` 请求：从当前稳定 session 的合法 ±1..±4 exact-key 中按前镜、后镜和偏移顺序定位首个 `completed / shortlisted / measured-only`，按需展开范围并滚入候选卡；不设置 B、不播放、不自动对照或写结论。收起卡片、跨模式摘要和全时间线待办共用该入口，人工问题引导保留独立 `issue` 语义。
 - 发布 `fbb8d281`：完整后端隔离外部执行后 `306 passed in 180.39s`，compileall、Vite `/assets/index-DERCEPFH.js`、diff check 通过；最终 API `53096` / Worker `1892`、Alembic `20260813_50`、draft null、四日志零错误。
+- 邻帧审核耗尽后新增确定性无损续办：只有当前双方全部合法 ±1..±4 exact-key 均为 `kept_baseline` 且无 B 时，平铺合法的滚动 ±1 帧及与基线不同的最短转场试用；不读取指标、不选方向、不播放、不采用或写草稿。无合法项时明确回到素材/结构处理。

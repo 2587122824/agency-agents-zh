@@ -1751,6 +1751,16 @@ function BoundaryActionComparison({
       : candidate.deltaMs >= rightMinimumPhaseMs && candidate.deltaMs <= rightMaximumPhaseMs)
   const leftDefaultPhaseCandidates = legalPhaseCandidatesForSide('left', defaultPhaseCandidateFrameOffsets)
   const rightDefaultPhaseCandidates = legalPhaseCandidatesForSide('right', defaultPhaseCandidateFrameOffsets)
+  const leftAllPhaseCandidates = legalPhaseCandidatesForSide('left', allPhaseCandidateFrameOffsets)
+  const rightAllPhaseCandidates = legalPhaseCandidatesForSide('right', allPhaseCandidateFrameOffsets)
+  const allLegalPhaseCandidates = [
+    ...leftAllPhaseCandidates.map(candidate => ({ ...candidate, side: 'left' as const })),
+    ...rightAllPhaseCandidates.map(candidate => ({ ...candidate, side: 'right' as const })),
+  ]
+  const phaseCandidateReviewExhausted = allLegalPhaseCandidates.length > 0
+    && allLegalPhaseCandidates.every(candidate => (
+      candidateComparisonOutcomes[candidateMotionSourceKey(candidate.side, candidate.deltaMs)] === 'kept_baseline'
+    ))
   const pendingDefaultPhaseCandidateCount = (side: 'left' | 'right', candidates: Array<{ frameOffset: number; deltaMs: number }>) => candidates
     .filter(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(side, candidate.deltaMs)] !== 'kept_baseline')
     .length
@@ -1905,6 +1915,11 @@ function BoundaryActionComparison({
     Math.floor((left.timeline_out_ms - left.timeline_in_ms) / 2),
     Math.floor((right.timeline_out_ms - right.timeline_in_ms) / 2),
   )
+  const exhaustedCandidateTransitionTrial = baselinePairedCut && transitionMaximumDurationMs >= 100
+    ? { type: 'fade' as const, durationMs: Math.min(200, transitionMaximumDurationMs), label: `试用淡出淡入 ${seconds(Math.min(200, transitionMaximumDurationMs))}` }
+    : !baselinePairedCut
+      ? { type: 'cut' as const, durationMs: 0, label: '试用直接切换' }
+      : null
   const activeTransitionTrial = viewingTunedPhase ? transitionTrial : null
   const activeLeftFadeMs = activeTransitionTrial
     ? activeTransitionTrial.type === 'fade' ? activeTransitionTrial.durationMs : 0
@@ -2777,6 +2792,27 @@ function BoundaryActionComparison({
       </>}
       {!phaseCandidateScanSide && <small>选择前镜或后镜后再按需加载候选，不会后台扫描整段素材。</small>}
     </section>
+    {phaseCandidateReviewExhausted && !hasComparisonTrial && <section
+      className={styles.boundaryCandidateExhaustedNext}
+      aria-label="邻帧候选全部排除后的无损续办"
+    >
+      <span>
+        <strong>{allLegalPhaseCandidates.length} 项合法邻帧均已保留 A</strong>
+        <small>相位微调已人工排除。可显式选择另一类 B 继续比较；系统不选择方向、不播放，也不自动采用。</small>
+      </span>
+      <div>
+        {rollMinimumDeltaMs <= -frameStepMs && <button type="button" onClick={() => adjustRollTrial(-frameStepMs)}>滚动切点 −1帧</button>}
+        {rollMaximumDeltaMs >= frameStepMs && <button type="button" onClick={() => adjustRollTrial(frameStepMs)}>滚动切点 +1帧</button>}
+        {exhaustedCandidateTransitionTrial && <button
+          type="button"
+          onClick={() => chooseTransitionTrial(exhaustedCandidateTransitionTrial.type, exhaustedCandidateTransitionTrial.durationMs)}
+        >{exhaustedCandidateTransitionTrial.label}</button>}
+      </div>
+      {!exhaustedCandidateTransitionTrial
+        && rollMinimumDeltaMs > -frameStepMs
+        && rollMaximumDeltaMs < frameStepMs
+        && <small>当前源窗和转场合同没有可用的下一类无损试调；请回到素材或镜头结构处理。</small>}
+    </section>}
     <div className={styles.boundaryTransitionTrial}>
       <span><strong>转场无损试用</strong><small>A 为当前 {baselineTransitionLabel}；B 在顺序舞台真实显示淡出至黑场再淡入，不是交叉叠化。</small></span>
       <div>
