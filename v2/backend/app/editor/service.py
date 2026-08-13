@@ -155,6 +155,7 @@ def _editor_draft_read(draft: EditorDraftSession) -> dict:
         "continuity_outcomes": draft.continuity_outcomes,
         "continuity_issue_contexts": draft.continuity_issue_contexts,
         "continuity_observations": draft.continuity_observations,
+        "candidate_review_sessions": draft.candidate_review_sessions,
         "row_version": draft.row_version,
         "updated_by": draft.updated_by,
         "updated_at": draft.updated_at,
@@ -207,11 +208,16 @@ def save_editor_draft(session: Session, project: Project, payload: SaveEditorDra
                 }
                 for key, observations in payload.continuity_observations.items()
             },
+            candidate_review_sessions={
+                key: review.model_dump(mode="json")
+                for key, review in payload.candidate_review_sessions.items()
+            },
             updated_by=payload.actor_id,
             updated_at=now,
         )
         repository.add(draft)
     else:
+        draft.schema_version = "editor-draft-session.v8"
         draft.snapshot_id = snapshot.id
         draft.base_timeline_id = timeline.id
         draft.base_timeline_row_version = timeline.row_version
@@ -229,6 +235,10 @@ def save_editor_draft(session: Session, project: Project, payload: SaveEditorDra
                 for mode, observation in observations.items()
             }
             for key, observations in payload.continuity_observations.items()
+        }
+        draft.candidate_review_sessions = {
+            key: review.model_dump(mode="json")
+            for key, review in payload.candidate_review_sessions.items()
         }
         draft.row_version += 1
         draft.updated_by = payload.actor_id

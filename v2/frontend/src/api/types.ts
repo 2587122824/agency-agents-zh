@@ -1407,6 +1407,53 @@ export interface EditorActionSequenceEvidence {
   right_context_ms: number
 }
 
+export interface EditorMotionChangeCentroid {
+  x_percent: number
+  y_percent: number
+  dispersion_percent: number
+}
+
+export interface EditorMotionCentroidPath {
+  x_percentage_points: number
+  y_percentage_points: number
+  distance_percent: number
+}
+
+export interface EditorMotionCentroidContinuity {
+  x_gap_percentage_points: number
+  y_gap_percentage_points: number
+  distance_gap_percentage_points: number
+  angle_degrees: number | null
+}
+
+export interface EditorBoundaryMotionAnalysis {
+  left_change_percent: number
+  right_change_percent: number
+  right_minus_left_percentage_points: number
+  left_grid_change_percent: number[]
+  right_grid_change_percent: number[]
+  right_minus_left_grid_percentage_points: number[]
+  left_centroid: EditorMotionChangeCentroid | null
+  right_centroid: EditorMotionChangeCentroid | null
+  left_rhythm_change_percent: Array<number | null>
+  right_rhythm_change_percent: Array<number | null>
+  left_rhythm_centroids: Array<EditorMotionChangeCentroid | null>
+  right_rhythm_centroids: Array<EditorMotionChangeCentroid | null>
+  left_centroid_path: EditorMotionCentroidPath | null
+  right_centroid_path: EditorMotionCentroidPath | null
+  centroid_path_continuity: EditorMotionCentroidContinuity | null
+  left_rhythm_slope_percentage_points: number | null
+  right_rhythm_slope_percentage_points: number | null
+  right_minus_left_rhythm_slope_percentage_points: number | null
+}
+
+export type EditorBoundaryCandidateComparisonOutcome = 'completed' | 'kept_baseline' | 'shortlisted'
+
+export interface EditorBoundaryCandidateReviewSession {
+  measured_motion_evidence: Record<string, EditorBoundaryMotionAnalysis>
+  comparison_outcomes: Record<string, EditorBoundaryCandidateComparisonOutcome>
+}
+
 export type EditorContinuityObservationStep =
   | 'left_frame'
   | 'right_frame'
@@ -1415,7 +1462,7 @@ export type EditorContinuityObservationStep =
   | 'sequential_cut_realtime_context'
 
 export interface EditorDraft {
-  schema_version: 'editor-draft-session.v7'
+  schema_version: 'editor-draft-session.v8'
   project_id: string
   snapshot_id: string
   base_timeline_id: string
@@ -1426,6 +1473,7 @@ export interface EditorDraft {
   continuity_outcomes: Record<string, Record<string, EditorContinuityOutcome>>
   continuity_issue_contexts: Record<string, EditorContinuityIssueContext[]>
   continuity_observations: Record<string, Partial<Record<'frames' | 'overlay' | 'action', EditorContinuityObservation>>>
+  candidate_review_sessions: Record<string, EditorBoundaryCandidateReviewSession>
   row_version: number
   updated_by: string
   updated_at: string

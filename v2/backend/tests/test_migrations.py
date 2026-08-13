@@ -132,6 +132,9 @@ def test_planning_authority_backfill_uses_persisted_candidate_status(tmp_path: P
     assert "continuity_observations" in {
         column["name"] for column in inspect(upgraded_engine).get_columns("editor_draft_sessions")
     }
+    assert "candidate_review_sessions" in {
+        column["name"] for column in inspect(upgraded_engine).get_columns("editor_draft_sessions")
+    }
     assert {
         "product_entity_version_ids",
         "primary_reference_entity_version_id",

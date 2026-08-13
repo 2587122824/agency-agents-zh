@@ -6668,6 +6668,7 @@ def save_fully_reviewed_editor_draft(
             "continuity_outcomes": outcomes,
             "continuity_issue_contexts": {},
             "continuity_observations": observations,
+            "candidate_review_sessions": {},
         },
     )
     assert response.status_code == 200
@@ -7986,6 +7987,43 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
         "transform": item["transform"],
     } for item in exported["items"]]
     first_boundary_key = f"{draft_items[0]['client_item_id']}-{draft_items[1]['client_item_id']}"
+    motion_analysis = {
+        "left_change_percent": 1.2,
+        "right_change_percent": 2.3,
+        "right_minus_left_percentage_points": 1.1,
+        "left_grid_change_percent": [1.0] * 9,
+        "right_grid_change_percent": [2.0] * 9,
+        "right_minus_left_grid_percentage_points": [1.0] * 9,
+        "left_centroid": {"x_percent": 25.0, "y_percent": 40.0, "dispersion_percent": 12.0},
+        "right_centroid": {"x_percent": 30.0, "y_percent": 45.0, "dispersion_percent": 14.0},
+        "left_rhythm_change_percent": [1.0, 1.2],
+        "right_rhythm_change_percent": [2.0, 2.3],
+        "left_rhythm_centroids": [
+            {"x_percent": 24.0, "y_percent": 39.0, "dispersion_percent": 11.0},
+            {"x_percent": 25.0, "y_percent": 40.0, "dispersion_percent": 12.0},
+        ],
+        "right_rhythm_centroids": [
+            {"x_percent": 29.0, "y_percent": 44.0, "dispersion_percent": 13.0},
+            {"x_percent": 30.0, "y_percent": 45.0, "dispersion_percent": 14.0},
+        ],
+        "left_centroid_path": {"x_percentage_points": 1.0, "y_percentage_points": 1.0, "distance_percent": 1.4},
+        "right_centroid_path": {"x_percentage_points": 1.0, "y_percentage_points": 1.0, "distance_percent": 1.4},
+        "centroid_path_continuity": {
+            "x_gap_percentage_points": 0.0,
+            "y_gap_percentage_points": 0.0,
+            "distance_gap_percentage_points": 0.0,
+            "angle_degrees": 0.0,
+        },
+        "left_rhythm_slope_percentage_points": 0.2,
+        "right_rhythm_slope_percentage_points": 0.3,
+        "right_minus_left_rhythm_slope_percentage_points": 0.1,
+    }
+    candidate_review_sessions = {
+        "stable-review-session": {
+            "measured_motion_evidence": {"exact-candidate-source": motion_analysis},
+            "comparison_outcomes": {"exact-candidate-source": "shortlisted"},
+        },
+    }
     saved_draft = client.put(
         f"/api/v1/projects/{project['id']}/editor-draft",
         json={
@@ -8033,10 +8071,11 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
                     },
                 },
             },
+            "candidate_review_sessions": candidate_review_sessions,
         },
     )
     assert saved_draft.status_code == 200
-    assert saved_draft.json()["schema_version"] == "editor-draft-session.v7"
+    assert saved_draft.json()["schema_version"] == "editor-draft-session.v8"
     assert saved_draft.json()["playhead_ms"] == 12_000
     assert saved_draft.json()["continuity_outcomes"] == {
         first_boundary_key: {"motion": "needs_adjustment", "subject": "passed"},
@@ -8048,6 +8087,52 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
             "mode": "action",
         }],
     }
+    assert saved_draft.json()["candidate_review_sessions"] == candidate_review_sessions
+    assert client.get(f"/api/v1/projects/{project['id']}/editor-draft").json()[
+        "candidate_review_sessions"
+    ] == candidate_review_sessions
+
+    invalid_outcome = json.loads(json.dumps(candidate_review_sessions))
+    invalid_outcome["stable-review-session"]["comparison_outcomes"]["exact-candidate-source"] = "recommended"
+    invalid_candidate_draft = client.put(
+        f"/api/v1/projects/{project['id']}/editor-draft",
+        json={
+            "actor_id": "test-user",
+            "expected_snapshot_id": snapshot["id"],
+            "base_timeline_id": exported["id"],
+            "base_timeline_row_version": exported["row_version"],
+            "track_config": exported["track_config"],
+            "items": draft_items,
+            "playhead_ms": 0,
+            "continuity_outcomes": {},
+            "continuity_issue_contexts": {},
+            "continuity_observations": {},
+            "candidate_review_sessions": invalid_outcome,
+        },
+    )
+    assert invalid_candidate_draft.status_code == 422
+
+    invalid_grid = json.loads(json.dumps(candidate_review_sessions))
+    invalid_grid["stable-review-session"]["measured_motion_evidence"][
+        "exact-candidate-source"
+    ]["left_grid_change_percent"] = [1.0] * 8
+    invalid_candidate_draft = client.put(
+        f"/api/v1/projects/{project['id']}/editor-draft",
+        json={
+            "actor_id": "test-user",
+            "expected_snapshot_id": snapshot["id"],
+            "base_timeline_id": exported["id"],
+            "base_timeline_row_version": exported["row_version"],
+            "track_config": exported["track_config"],
+            "items": draft_items,
+            "playhead_ms": 0,
+            "continuity_outcomes": {},
+            "continuity_issue_contexts": {},
+            "continuity_observations": {},
+            "candidate_review_sessions": invalid_grid,
+        },
+    )
+    assert invalid_candidate_draft.status_code == 422
     assert client.get(f"/api/v1/projects/{project['id']}/editor-draft").json()["items"] == draft_items
 
     stripped_draft_items = [
@@ -8088,6 +8173,7 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
             "continuity_outcomes": reviewed_draft["continuity_outcomes"],
             "continuity_issue_contexts": {},
             "continuity_observations": stale_observations,
+            "candidate_review_sessions": reviewed_draft["candidate_review_sessions"],
         },
     )
     assert stale_draft.status_code == 200
@@ -8123,6 +8209,7 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
             "continuity_outcomes": reviewed_draft["continuity_outcomes"],
             "continuity_issue_contexts": {},
             "continuity_observations": incomplete_action_observations,
+            "candidate_review_sessions": reviewed_draft["candidate_review_sessions"],
         },
     )
     assert incomplete_action_draft.status_code == 200
@@ -8160,6 +8247,7 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
             "continuity_outcomes": reviewed_draft["continuity_outcomes"],
             "continuity_issue_contexts": {},
             "continuity_observations": insufficient_context_observations,
+            "candidate_review_sessions": reviewed_draft["candidate_review_sessions"],
         },
     )
     assert insufficient_context_draft.status_code == 200

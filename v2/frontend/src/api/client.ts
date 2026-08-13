@@ -372,6 +372,7 @@ export const api = {
     continuityOutcomes: Record<string, Record<string, EditorContinuityOutcome>>,
     continuityIssueContexts: Record<string, EditorContinuityIssueContext[]>,
     continuityObservations: Record<string, Partial<Record<'frames' | 'overlay' | 'action', EditorContinuityObservation>>>,
+    candidateReviewSessions: Record<string, import('./types').EditorBoundaryCandidateReviewSession>,
   ) => request<EditorDraft>(`/projects/${projectId}/editor-draft`, {
     method: 'PUT',
     body: JSON.stringify({
@@ -397,6 +398,7 @@ export const api = {
       continuity_outcomes: continuityOutcomes,
       continuity_issue_contexts: continuityIssueContexts,
       continuity_observations: continuityObservations,
+      candidate_review_sessions: candidateReviewSessions,
     }),
   }),
   discardEditorDraft: (projectId: string) => request<{ status: 'discarded' }>(`/projects/${projectId}/editor-draft`, {

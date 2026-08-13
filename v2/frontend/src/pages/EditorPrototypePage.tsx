@@ -15,10 +15,10 @@ import {
 import { Link, useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
-import type { DeliveryAttempt, DeliveryWorkspace, EditorActionSequenceEvidence, EditorContinuityObservation, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from '../api/types'
+import type { DeliveryAttempt, DeliveryWorkspace, EditorActionSequenceEvidence, EditorBoundaryCandidateReviewSession, EditorContinuityObservation, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from '../api/types'
 import styles from './EditorPrototypePage.module.css'
 
-const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v10'
+const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v11'
 
 interface LocalEditorDraft {
   schema_version: typeof LOCAL_DRAFT_SCHEMA
@@ -31,6 +31,7 @@ interface LocalEditorDraft {
   boundary_continuity_outcomes: Record<string, Record<string, BoundaryContinuityCheckOutcome>>
   boundary_continuity_issue_contexts: Record<string, BoundaryContinuityIssueContext[]>
   boundary_continuity_observations: BoundaryContinuityObservations
+  boundary_candidate_review_sessions: Record<string, BoundaryCandidateReviewSession>
   saved_at: string
 }
 
@@ -271,6 +272,7 @@ function editorDraftFingerprint(
   boundaryContinuityOutcomes: Record<string, Record<string, BoundaryContinuityCheckOutcome>>,
   boundaryContinuityIssueContexts: Record<string, BoundaryContinuityIssueContext[]>,
   boundaryContinuityObservations: BoundaryContinuityObservations,
+  boundaryCandidateReviewSessions: Record<string, BoundaryCandidateReviewSession>,
 ) {
   return JSON.stringify(canonicalDraftValue({
     base: sourceTimeline ? [sourceTimeline.id, sourceTimeline.row_version] : null,
@@ -293,6 +295,7 @@ function editorDraftFingerprint(
     boundary_continuity_outcomes: boundaryContinuityOutcomes,
     boundary_continuity_issue_contexts: boundaryContinuityIssueContexts,
     boundary_continuity_observations: boundaryContinuityObservations,
+    boundary_candidate_review_sessions: boundaryCandidateReviewSessions,
   }))
 }
 
@@ -3076,38 +3079,45 @@ export function EditorPrototypePage() {
     requestToken: number
   } | null>(null)
   const [boundaryCandidateReviewSessions, setBoundaryCandidateReviewSessions] = useState<Record<string, BoundaryCandidateReviewSession>>({})
+  const boundaryCandidateReviewSessionsRef = useRef<Record<string, BoundaryCandidateReviewSession>>({})
+  const replaceBoundaryCandidateReviewSessions = useCallback((sessions: Record<string, BoundaryCandidateReviewSession>) => {
+    boundaryCandidateReviewSessionsRef.current = sessions
+    setBoundaryCandidateReviewSessions(sessions)
+  }, [])
   const rememberBoundaryCandidateMotionEvidence = useCallback((
     sessionKey: string,
     sourceKey: string,
     analysis: BoundaryMotionAnalysis,
   ) => {
-    setBoundaryCandidateReviewSessions(current => {
-      const session = current[sessionKey] ?? EMPTY_BOUNDARY_CANDIDATE_REVIEW_SESSION
-      return {
-        ...current,
-        [sessionKey]: {
-          ...session,
-          measuredMotionEvidence: { ...session.measuredMotionEvidence, [sourceKey]: analysis },
-        },
-      }
+    const current = boundaryCandidateReviewSessionsRef.current
+    const session = current[sessionKey] ?? EMPTY_BOUNDARY_CANDIDATE_REVIEW_SESSION
+    if (JSON.stringify(session.measuredMotionEvidence[sourceKey]) === JSON.stringify(analysis)) return
+    replaceBoundaryCandidateReviewSessions({
+      ...current,
+      [sessionKey]: {
+        ...session,
+        measuredMotionEvidence: { ...session.measuredMotionEvidence, [sourceKey]: analysis },
+      },
     })
-  }, [])
+    setDirty(true)
+  }, [replaceBoundaryCandidateReviewSessions])
   const rememberBoundaryCandidateComparisonOutcome = useCallback((
     sessionKey: string,
     sourceKey: string,
     outcome: BoundaryCandidateComparisonOutcome,
   ) => {
-    setBoundaryCandidateReviewSessions(current => {
-      const session = current[sessionKey] ?? EMPTY_BOUNDARY_CANDIDATE_REVIEW_SESSION
-      return {
-        ...current,
-        [sessionKey]: {
-          ...session,
-          comparisonOutcomes: { ...session.comparisonOutcomes, [sourceKey]: outcome },
-        },
-      }
+    const current = boundaryCandidateReviewSessionsRef.current
+    const session = current[sessionKey] ?? EMPTY_BOUNDARY_CANDIDATE_REVIEW_SESSION
+    if (session.comparisonOutcomes[sourceKey] === outcome) return
+    replaceBoundaryCandidateReviewSessions({
+      ...current,
+      [sessionKey]: {
+        ...session,
+        comparisonOutcomes: { ...session.comparisonOutcomes, [sourceKey]: outcome },
+      },
     })
-  }, [])
+    setDirty(true)
+  }, [replaceBoundaryCandidateReviewSessions])
   const [pendingBoundaryPreviewKey, setPendingBoundaryPreviewKey] = useState<string | null>(null)
   const [boundaryRollMonitor, setBoundaryRollMonitor] = useState<{
     boundaryKey: string
@@ -3242,6 +3252,7 @@ export function EditorPrototypePage() {
     setBoundaryContinuityIssueContexts({})
     setBoundaryContinuityObservations({})
     setBoundaryContinuityReadyEvidence({})
+    replaceBoundaryCandidateReviewSessions({})
     setBoundaryContinuityObservations({})
     setBoundaryContinuityReadyEvidence({})
     setDirty(false)
@@ -3253,7 +3264,7 @@ export function EditorPrototypePage() {
     setLastAutoSavedAt(null)
     setLastAutoSavedFingerprint(null)
     setLastAutoSaveAttemptFingerprint(null)
-  }, [projectId])
+  }, [projectId, replaceBoundaryCandidateReviewSessions])
 
   useEffect(() => {
     if (!sourceTimeline || !workspace.data || serverDraft.isPending) return
@@ -3303,6 +3314,12 @@ export function EditorPrototypePage() {
     const remotePlayheadMs = remote?.playhead_ms ?? 0
     const remoteContinuityOutcomes = remote?.continuity_outcomes ?? {}
     const remoteContinuityObservations = remote?.continuity_observations ?? {}
+    const remoteCandidateReviewSessions: Record<string, BoundaryCandidateReviewSession> = Object.fromEntries(
+      Object.entries(remote?.candidate_review_sessions ?? {}).map(([key, session]) => [key, {
+        measuredMotionEvidence: session.measured_motion_evidence,
+        comparisonOutcomes: session.comparison_outcomes,
+      }]),
+    )
     const remoteContinuityIssueContexts = Object.fromEntries(
       Object.entries(remote?.continuity_issue_contexts ?? {}).map(([key, contexts]) => [
         key,
@@ -3323,6 +3340,7 @@ export function EditorPrototypePage() {
         remoteContinuityOutcomes,
         remoteContinuityIssueContexts,
         remoteContinuityObservations,
+        remoteCandidateReviewSessions,
       )
       : null
     const localFingerprint = localRestored
@@ -3335,6 +3353,7 @@ export function EditorPrototypePage() {
         localRestored.boundary_continuity_outcomes,
         localRestored.boundary_continuity_issue_contexts,
         localRestored.boundary_continuity_observations,
+        localRestored.boundary_candidate_review_sessions,
       )
       : null
     const localMatchesRemote = Boolean(remoteFingerprint && localFingerprint === remoteFingerprint)
@@ -3361,12 +3380,16 @@ export function EditorPrototypePage() {
     const restoredContinuityObservations = useRemote
       ? remoteContinuityObservations
       : localRestored?.boundary_continuity_observations ?? {}
+    const restoredCandidateReviewSessions = useRemote
+      ? remoteCandidateReviewSessions
+      : localRestored?.boundary_candidate_review_sessions ?? {}
     setItems(restoredItems)
     setTimelineZoom(restoredZoom)
     setSnapEnabled(restoredSnapEnabled)
     setBoundaryContinuityOutcomes(restoredContinuityOutcomes)
     setBoundaryContinuityIssueContexts(restoredContinuityIssueContexts)
     setBoundaryContinuityObservations(restoredContinuityObservations)
+    replaceBoundaryCandidateReviewSessions(restoredCandidateReviewSessions)
     setBoundaryContinuityReadyEvidence({})
     setDirty(Boolean(remoteItems || localRestored))
     setLastAutoSavedAt(useRemote && remote ? remote.updated_at : null)
@@ -3583,7 +3606,20 @@ export function EditorPrototypePage() {
       const retained = Object.entries(current).filter(([key]) => currentBoundaryKeys.has(key))
       return retained.length === Object.keys(current).length ? current : Object.fromEntries(retained)
     })
-  }, [mainBoundaries])
+    const validCandidateSessionKeys = new Set(mainBoundaries.flatMap(boundary => (
+      boundary.left.asset_id && boundary.right.asset_id
+        ? [boundaryCandidateReviewSessionKey(projectId, boundary.left, boundary.right, frameStepMs, outputFps)]
+        : []
+    )))
+    const currentCandidateSessions = boundaryCandidateReviewSessionsRef.current
+    const retainedCandidateSessions = Object.fromEntries(
+      Object.entries(currentCandidateSessions).filter(([key]) => validCandidateSessionKeys.has(key)),
+    )
+    if (Object.keys(retainedCandidateSessions).length !== Object.keys(currentCandidateSessions).length) {
+      replaceBoundaryCandidateReviewSessions(retainedCandidateSessions)
+      setDirty(true)
+    }
+  }, [frameStepMs, mainBoundaries, outputFps, projectId, replaceBoundaryCandidateReviewSessions])
   const candidateReviewFollowUpBoundaries = useMemo(
     () => mainBoundaries.flatMap((boundary, index) => {
       if (!boundary.left.asset_id || !boundary.right.asset_id) return []
@@ -3772,8 +3808,9 @@ export function EditorPrototypePage() {
       boundaryContinuityOutcomes,
       boundaryContinuityIssueContexts,
       boundaryContinuityObservations,
+      boundaryCandidateReviewSessions,
     ),
-    [boundaryContinuityIssueContexts, boundaryContinuityObservations, boundaryContinuityOutcomes, items, playheadMs, snapEnabled, sourceTimeline, timelineZoom],
+    [boundaryCandidateReviewSessions, boundaryContinuityIssueContexts, boundaryContinuityObservations, boundaryContinuityOutcomes, items, playheadMs, snapEnabled, sourceTimeline, timelineZoom],
   )
 
   useEffect(() => {
@@ -3784,6 +3821,7 @@ export function EditorPrototypePage() {
   useEffect(() => {
     setBoundaryActionComparisonKey(null)
     setBoundaryContinuityReadyEvidence({})
+    replaceBoundaryCandidateReviewSessions({})
   }, [items])
 
   useEffect(() => {
@@ -3935,10 +3973,11 @@ export function EditorPrototypePage() {
       boundary_continuity_outcomes: boundaryContinuityOutcomes,
       boundary_continuity_issue_contexts: boundaryContinuityIssueContexts,
       boundary_continuity_observations: boundaryContinuityObservations,
+      boundary_candidate_review_sessions: boundaryCandidateReviewSessions,
       saved_at: new Date().toISOString(),
     }
     window.localStorage.setItem(localDraftKey, JSON.stringify(draft))
-  }, [boundaryContinuityIssueContexts, boundaryContinuityObservations, boundaryContinuityOutcomes, boundaryRollMonitor, dirty, items, localDraftKey, playheadMs, snapEnabled, sourceTimeline, timelineZoom])
+  }, [boundaryCandidateReviewSessions, boundaryContinuityIssueContexts, boundaryContinuityObservations, boundaryContinuityOutcomes, boundaryRollMonitor, dirty, items, localDraftKey, playheadMs, snapEnabled, sourceTimeline, timelineZoom])
 
   const saveCurrentEditorDraft = async () => {
     if (!sourceTimeline) throw new Error('当前没有可保存的剪辑基线。')
@@ -3957,7 +3996,12 @@ export function EditorPrototypePage() {
           mode: context.mode,
         })),
       ]),
-    ), boundaryContinuityObservations)
+    ), boundaryContinuityObservations, Object.fromEntries(
+      Object.entries(boundaryCandidateReviewSessions).map(([key, session]) => [key, {
+        measured_motion_evidence: session.measuredMotionEvidence,
+        comparison_outcomes: session.comparisonOutcomes,
+      }]),
+    ) as Record<string, EditorBoundaryCandidateReviewSession>)
   }
 
   const autoSaveDraft = useMutation({

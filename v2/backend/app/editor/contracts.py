@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class EditorCommand(BaseModel):
@@ -90,6 +90,95 @@ class EditorContinuityObservation(BaseModel):
     action_sequence_evidence: EditorActionSequenceEvidence | None
 
 
+class EditorMotionChangeCentroid(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    x_percent: float = Field(ge=0, le=100)
+    y_percent: float = Field(ge=0, le=100)
+    dispersion_percent: float = Field(ge=0, le=100)
+
+
+class EditorMotionCentroidPath(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    x_percentage_points: float = Field(ge=-100, le=100)
+    y_percentage_points: float = Field(ge=-100, le=100)
+    distance_percent: float = Field(ge=0, le=142)
+
+
+class EditorMotionCentroidContinuity(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    x_gap_percentage_points: float = Field(ge=-200, le=200)
+    y_gap_percentage_points: float = Field(ge=-200, le=200)
+    distance_gap_percentage_points: float = Field(ge=-142, le=142)
+    angle_degrees: float | None = Field(ge=0, le=180)
+
+
+class EditorBoundaryMotionAnalysis(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    left_change_percent: float = Field(ge=0, le=100)
+    right_change_percent: float = Field(ge=0, le=100)
+    right_minus_left_percentage_points: float = Field(ge=-100, le=100)
+    left_grid_change_percent: list[float] = Field(min_length=9, max_length=9)
+    right_grid_change_percent: list[float] = Field(min_length=9, max_length=9)
+    right_minus_left_grid_percentage_points: list[float] = Field(min_length=9, max_length=9)
+    left_centroid: EditorMotionChangeCentroid | None
+    right_centroid: EditorMotionChangeCentroid | None
+    left_rhythm_change_percent: list[float | None] = Field(min_length=2, max_length=2)
+    right_rhythm_change_percent: list[float | None] = Field(min_length=2, max_length=2)
+    left_rhythm_centroids: list[EditorMotionChangeCentroid | None] = Field(min_length=2, max_length=2)
+    right_rhythm_centroids: list[EditorMotionChangeCentroid | None] = Field(min_length=2, max_length=2)
+    left_centroid_path: EditorMotionCentroidPath | None
+    right_centroid_path: EditorMotionCentroidPath | None
+    centroid_path_continuity: EditorMotionCentroidContinuity | None
+    left_rhythm_slope_percentage_points: float | None = Field(ge=-100, le=100)
+    right_rhythm_slope_percentage_points: float | None = Field(ge=-100, le=100)
+    right_minus_left_rhythm_slope_percentage_points: float | None = Field(ge=-200, le=200)
+
+    @field_validator("left_grid_change_percent", "right_grid_change_percent")
+    @classmethod
+    def validate_grid_percentages(cls, values: list[float]) -> list[float]:
+        if any(value < 0 or value > 100 for value in values):
+            raise ValueError("grid change percentages must be between 0 and 100")
+        return values
+
+    @field_validator("right_minus_left_grid_percentage_points")
+    @classmethod
+    def validate_grid_deltas(cls, values: list[float]) -> list[float]:
+        if any(value < -100 or value > 100 for value in values):
+            raise ValueError("grid percentage-point deltas must be between -100 and 100")
+        return values
+
+    @field_validator("left_rhythm_change_percent", "right_rhythm_change_percent")
+    @classmethod
+    def validate_rhythm_percentages(cls, values: list[float | None]) -> list[float | None]:
+        if any(value is not None and (value < 0 or value > 100) for value in values):
+            raise ValueError("rhythm change percentages must be between 0 and 100")
+        return values
+
+
+class EditorBoundaryCandidateReviewSession(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    measured_motion_evidence: dict[str, EditorBoundaryMotionAnalysis] = Field(max_length=8)
+    comparison_outcomes: dict[
+        str,
+        Literal["completed", "kept_baseline", "shortlisted"],
+    ] = Field(max_length=8)
+
+    @field_validator("measured_motion_evidence", "comparison_outcomes")
+    @classmethod
+    def validate_source_keys(cls, values: dict[str, object]) -> dict[str, object]:
+        if any(not key or len(key) > 2048 for key in values):
+            raise ValueError("candidate source keys must contain 1 to 2048 characters")
+        return values
+
+
+def validate_candidate_session_keys(
+    values: dict[str, EditorBoundaryCandidateReviewSession],
+) -> dict[str, EditorBoundaryCandidateReviewSession]:
+    if any(not key or len(key) > 2048 for key in values):
+        raise ValueError("candidate review session keys must contain 1 to 2048 characters")
+    return values
+
+
 class SaveEditorDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
     actor_id: str = Field(default="local-user", min_length=1, max_length=48)
@@ -105,10 +194,15 @@ class SaveEditorDraft(BaseModel):
         str,
         dict[Literal["frames", "overlay", "action"], EditorContinuityObservation],
     ] = Field(max_length=500)
+    candidate_review_sessions: dict[str, EditorBoundaryCandidateReviewSession] = Field(max_length=500)
+
+    _validate_candidate_session_keys = field_validator("candidate_review_sessions")(
+        validate_candidate_session_keys
+    )
 
 
 class EditorDraftRead(BaseModel):
-    schema_version: Literal["editor-draft-session.v7"] = "editor-draft-session.v7"
+    schema_version: Literal["editor-draft-session.v8"] = "editor-draft-session.v8"
     project_id: str
     snapshot_id: str
     base_timeline_id: str
@@ -122,6 +216,7 @@ class EditorDraftRead(BaseModel):
         str,
         dict[Literal["frames", "overlay", "action"], EditorContinuityObservation],
     ]
+    candidate_review_sessions: dict[str, EditorBoundaryCandidateReviewSession]
     row_version: int
     updated_by: str
     updated_at: datetime

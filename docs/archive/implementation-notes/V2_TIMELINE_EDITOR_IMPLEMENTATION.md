@@ -665,3 +665,11 @@ Alembic 修订：`20260716_09`。
 ## 12. 后续接口
 
 交付模块只能读取当前活动快照的 `confirmed` 时间线。导出必须另建 `DeliveryAttempt`，并在最终文件登记、验证和规格检查通过后创建 `final_delivery` Asset。导出失败不得修改时间线、移除音频、关闭字幕或替换素材。
+## 邻帧候选审核草稿会话
+
+- 草稿合同升级为 `editor-draft-session.v8`，本地草稿升级为 `editor-local-draft.v11`。
+- `candidate_review_sessions` 按稳定边界 session key 保存 exact source key 对应的完整 `BoundaryMotionAnalysis` 与 `completed / kept_baseline / shortlisted`。
+- Alembic `20260813_50` 新增 JSON 列，已有开发数据显式重建为空，不增加旧合同兼容分支。
+- 前端首次恢复只写父级审核缓存；扫描侧、±4 展开、当前 B、媒体状态、pending 与结论门禁不恢复。
+- 动作探针返回相同对象或重复写入同一结果时不置脏；真实增改及失效 session 删除才进入 localStorage 和 900ms API 自动保存。
+- 后端拒绝额外字段、非法 outcome、超长 key、错误九宫格/节奏数组和越界数值；候选审核不会成为 Timeline 连续性通过证据。
