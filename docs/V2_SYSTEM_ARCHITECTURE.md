@@ -424,4 +424,5 @@ render 对每个 context 独立读取当前 outcome，派生 handling/recheck �
 - 匹配远端草稿恢复后设置 `dirty=false`，不触发首屏 autosave；仅 localStorage fallback 设置 `dirty=true`。权威远端恢复是读取，不是编辑事件。
 - `suppressDraftWritesRef` 在 project reset 同步置 true，恢复完成后的下一 macrotask 才置 false；localStorage/API save effects 在 true 时退出。该门禁覆盖 React effect 读取旧 dirty 的同一 commit，确保恢复绝对零写入。
 - `save_editor_draft` 对 `candidate_review_sessions` 执行两层追加合并：session key 与 exact source key 均保留服务端已有值，incoming 同 key 覆盖以支持重新实测/改结论，incoming 空对象不能删除。该领域约束抵御迟到 autosave/多标签页覆盖；整体草稿 DELETE 是唯一清除路径。
+- 客户端恢复镜像相同两层语义：session key 并集后分别深合并 evidence/outcome exact maps；当前 exact key 覆盖远端同 key，空 session 不会覆盖远端非空 session。
 - 恢复权威顺序为：匹配当前 Timeline 基线的远端 `EditorDraftSession` 始终优先，localStorage 只在无匹配远端草稿时作为浏览器崩溃兜底。客户端时间戳不能把本地副本提升到权威远端之上，避免旧空候选 session 被自动回写覆盖服务端审核进度。

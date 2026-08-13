@@ -3382,7 +3382,23 @@ export function EditorPrototypePage() {
     setBoundaryContinuityIssueContexts(restoredContinuityIssueContexts)
     setBoundaryContinuityObservations(restoredContinuityObservations)
     const mergedCandidateReviewSessions = candidateReviewSessionsLoadedRef.current
-      ? { ...restoredCandidateReviewSessions, ...boundaryCandidateReviewSessionsRef.current }
+      ? Object.fromEntries(Array.from(new Set([
+        ...Object.keys(restoredCandidateReviewSessions),
+        ...Object.keys(boundaryCandidateReviewSessionsRef.current),
+      ])).map(key => {
+        const restoredSession = restoredCandidateReviewSessions[key] ?? EMPTY_BOUNDARY_CANDIDATE_REVIEW_SESSION
+        const currentSession = boundaryCandidateReviewSessionsRef.current[key] ?? EMPTY_BOUNDARY_CANDIDATE_REVIEW_SESSION
+        return [key, {
+          measuredMotionEvidence: {
+            ...restoredSession.measuredMotionEvidence,
+            ...currentSession.measuredMotionEvidence,
+          },
+          comparisonOutcomes: {
+            ...restoredSession.comparisonOutcomes,
+            ...currentSession.comparisonOutcomes,
+          },
+        }]
+      }))
       : restoredCandidateReviewSessions
     boundaryCandidateReviewSessionsRef.current = mergedCandidateReviewSessions
     setBoundaryCandidateReviewSessions(mergedCandidateReviewSessions)
