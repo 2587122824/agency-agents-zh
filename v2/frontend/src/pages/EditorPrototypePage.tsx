@@ -3382,7 +3382,8 @@ export function EditorPrototypePage() {
     const mergedCandidateReviewSessions = candidateReviewSessionsLoadedRef.current
       ? { ...restoredCandidateReviewSessions, ...boundaryCandidateReviewSessionsRef.current }
       : restoredCandidateReviewSessions
-    replaceBoundaryCandidateReviewSessions(mergedCandidateReviewSessions)
+    boundaryCandidateReviewSessionsRef.current = mergedCandidateReviewSessions
+    setBoundaryCandidateReviewSessions(mergedCandidateReviewSessions)
     candidateReviewSessionsLoadedRef.current = true
     setBoundaryContinuityReadyEvidence({})
     setDirty(Boolean(remoteItems || localRestored))
@@ -3991,7 +3992,7 @@ export function EditorPrototypePage() {
         })),
       ]),
     ), boundaryContinuityObservations, Object.fromEntries(
-      Object.entries(boundaryCandidateReviewSessions).map(([key, session]) => [key, {
+      Object.entries(boundaryCandidateReviewSessionsRef.current).map(([key, session]) => [key, {
         measured_motion_evidence: session.measuredMotionEvidence,
         comparison_outcomes: session.comparisonOutcomes,
       }]),
