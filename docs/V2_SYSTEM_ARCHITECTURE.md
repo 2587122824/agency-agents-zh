@@ -416,4 +416,5 @@ render 对每个 context 独立读取当前 outcome，派生 handling/recheck �
 - `[items]` effect 仅关闭动作比较并清除临时连续性 ready evidence，不再清空父级候选 session；items 是草稿恢复的必经 state 更新，不能被解释为删除已恢复审核。结构隔离由 session key 而非破坏性 state reset 完成。
 - 草稿恢复 effect 的依赖排除 `workspace.data` 整体引用；只在基线 ID/row version、草稿 query 或 local key 变化时运行。项目列表轮询更新 query cache 不能重放恢复过程或覆盖当前候选 session。
 - `editorDraftRestoreCompleteRef` 是同步草稿写入总门禁：项目重置 effect 立即写 false，恢复 effect 完整注入 items、连续性和候选 session 后写 true。localStorage 与 API autosave 每次执行直接读取 ref，避免两个 effect 同轮排队的 state 更新合并后放行中间空 state。
+- `resetProjectIdRef` 使页面级 reset 对每个 project ID 幂等；同项目 effect 重放不能在草稿恢复后再次清空 items/session，project ID 真正变化时才执行完整 reset。
 - 恢复权威顺序为：匹配当前 Timeline 基线的远端 `EditorDraftSession` 始终优先，localStorage 只在无匹配远端草稿时作为浏览器崩溃兜底。客户端时间戳不能把本地副本提升到权威远端之上，避免旧空候选 session 被自动回写覆盖服务端审核进度。

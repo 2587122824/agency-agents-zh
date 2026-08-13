@@ -678,4 +678,5 @@ Alembic 修订：`20260716_09`。
 - 删除 `[items]` effect 的候选 session 全量清空；items 恢复或结构变化仍关闭当前动作工具，但不会删除父级审核记忆。
 - 恢复 effect 不依赖 `workspace.data` 整体对象，避免项目列表/工作区刷新反复重跑恢复并覆盖候选 state。
 - localStorage 与 API autosave 读取同步 `editorDraftRestoreCompleteRef`；不要用异步 state 门禁两个同轮恢复 effect。
+- 项目 reset 用 `resetProjectIdRef` 按 project ID 幂等，防止同项目 effect 重放清空已恢复 session。
 - 只要远端草稿与当前 Timeline 基线匹配就始终优先；localStorage 仅在无匹配远端草稿时兜底，不能按客户端时间覆盖权威候选审核。
