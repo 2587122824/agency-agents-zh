@@ -631,6 +631,7 @@ v2/runtime/worker.err.log
 - 邻帧候选全部人工排除后不再停在工具死路：当前稳定 session 双方合法 ±1..±4 exact-key 全部为 `kept_baseline` 且没有 B 时，显示确定性无损续办，只平铺当前合同合法的滚动 ±1 帧方向和与 A 不同的最短合法转场；用户点击才形成 B，不读取指标、不推荐、不播放、不采用或写草稿。真实咖啡 v12 后镜 4 项全部保留 A 后只显示合法的 `试用淡出淡入 0.2s`（滚动范围为零）；点击后 B 可见、播放=0、服务端 row version/updated_at 不变。验收草稿已丢弃，恢复 Timeline v12、播放头 0、零待办、`1280/1280`。
 - 发布提交 `0192a4a2` 已推送 `main`。隔离外部执行后的完整后端 `306 passed in 185.53s`，Python compileall、Vite `/assets/index-ClLmzjZ8.js`、diff check 通过。关闭 Browser 后标准重启，最终 API `52712` / Worker `50780`，创建时间均为 `2026-08-13 17:19:23`；健康 `ok`、Alembic runtime/head `20260813_50`、draft null、四日志零实际错误。
 - 替代试调的人工排除也纳入权威草稿：`editor-draft-session.v9 / editor-local-draft.v12` 的 session 新增 `alternative_outcomes`，迁移 `20260813_51` 显式重建开发候选 session；只有续办区滚动/转场 B 完整 A→B 后明确保留 A 才记录 `kept_baseline`。服务端按 session/map 追加合并，迟到空 payload 不删除。已排除替代从按钮中消失，全部排除后明确回到素材/镜头结构；采用 B 后新 session 自然隔离。真实咖啡淡出 0.2s 完整对照保留 A 后按钮消失，刷新仍保持结构处理终态、B=0、播放=0、`1280/1280`；验收草稿已丢弃并恢复 v12。
+- 发布提交 `f6906d39` 已推送 `main`。完整后端隔离外部执行后 `306 passed in 190.87s`；新增 v9 往返、非法替代结果、alternative map 追加合并、空 payload 保留与迁移 head 断言。Python compileall、Vite `/assets/index-BDgajzuP.js`、diff check 通过。关闭 Browser 后标准重启，最终 API `39756` / Worker `15780`，创建时间均为 `2026-08-13 17:41:50`；健康 `ok`、Alembic runtime/head `20260813_51`、draft null、四日志零实际错误。
 
 ## 9. 下一步
 
