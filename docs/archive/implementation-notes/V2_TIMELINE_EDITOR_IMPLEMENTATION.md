@@ -690,3 +690,4 @@ Alembic 修订：`20260716_09`。
 - 最终发布验收：完整后端 `306 passed in 147.71s`，生产 bundle `/assets/index-Csf6vzQ9.js`；真实 v12 对照保存后服务端 session 在刷新前后均为 1，UI 恢复 `2/2 / 保留 A 1 / 待决定 1`，但刷新不恢复 B、扫描或播放。清理后 draft null；最终 API `50644` / Worker `38820`、Alembic `20260813_50`、四日志零错误。
 - 只要远端草稿与当前 Timeline 基线匹配就始终优先；localStorage 仅在无匹配远端草稿时兜底，不能按客户端时间覆盖权威候选审核。
 - 候选继续入口新增瞬时 `resume` 请求：从当前稳定 session 的合法 ±1..±4 exact-key 中按前镜、后镜和偏移顺序定位首个 `completed / shortlisted / measured-only`，按需展开范围并滚入候选卡；不设置 B、不播放、不自动对照或写结论。收起卡片、跨模式摘要和全时间线待办共用该入口，人工问题引导保留独立 `issue` 语义。
+- 发布 `fbb8d281`：完整后端隔离外部执行后 `306 passed in 180.39s`，compileall、Vite `/assets/index-DERCEPFH.js`、diff check 通过；最终 API `53096` / Worker `1892`、Alembic `20260813_50`、draft null、四日志零错误。
