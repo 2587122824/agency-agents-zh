@@ -236,10 +236,21 @@ def save_editor_draft(session: Session, project: Project, payload: SaveEditorDra
             }
             for key, observations in payload.continuity_observations.items()
         }
-        draft.candidate_review_sessions = {
-            key: review.model_dump(mode="json")
-            for key, review in payload.candidate_review_sessions.items()
-        }
+        merged_candidate_review_sessions = dict(draft.candidate_review_sessions)
+        for key, review in payload.candidate_review_sessions.items():
+            incoming = review.model_dump(mode="json")
+            existing = merged_candidate_review_sessions.get(key, {})
+            merged_candidate_review_sessions[key] = {
+                "measured_motion_evidence": {
+                    **existing.get("measured_motion_evidence", {}),
+                    **incoming["measured_motion_evidence"],
+                },
+                "comparison_outcomes": {
+                    **existing.get("comparison_outcomes", {}),
+                    **incoming["comparison_outcomes"],
+                },
+            }
+        draft.candidate_review_sessions = merged_candidate_review_sessions
         draft.row_version += 1
         draft.updated_by = payload.actor_id
         draft.updated_at = now

@@ -8112,6 +8112,25 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
     )
     assert invalid_candidate_draft.status_code == 422
 
+    preserve_candidate_sessions = client.put(
+        f"/api/v1/projects/{project['id']}/editor-draft",
+        json={
+            "actor_id": "test-user",
+            "expected_snapshot_id": snapshot["id"],
+            "base_timeline_id": exported["id"],
+            "base_timeline_row_version": exported["row_version"],
+            "track_config": exported["track_config"],
+            "items": draft_items,
+            "playhead_ms": 0,
+            "continuity_outcomes": {},
+            "continuity_issue_contexts": {},
+            "continuity_observations": {},
+            "candidate_review_sessions": {},
+        },
+    )
+    assert preserve_candidate_sessions.status_code == 200
+    assert preserve_candidate_sessions.json()["candidate_review_sessions"] == candidate_review_sessions
+
     invalid_grid = json.loads(json.dumps(candidate_review_sessions))
     invalid_grid["stable-review-session"]["measured_motion_evidence"][
         "exact-candidate-source"
@@ -8146,7 +8165,7 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
             "actor_id": "test-user",
             "expected_snapshot_id": snapshot["id"],
             "expected_row_version": exported["row_version"],
-            "expected_editor_draft_row_version": saved_draft.json()["row_version"],
+            "expected_editor_draft_row_version": preserve_candidate_sessions.json()["row_version"],
             "source": "user",
             "track_config": exported["track_config"],
             "items": stripped_draft_items,
