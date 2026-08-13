@@ -1417,9 +1417,9 @@ function BoundaryPhaseCandidate({
           ? '本次已选择保留 A'
           : comparisonOutcome === 'shortlisted' ? '已暂存 B 待复看' : '已完整对照 A→B'}</strong>
         <small>{comparisonOutcome === 'kept_baseline'
-          ? '人工结果仅保留在本页；可再次对照。'
+          ? '人工结果已保存到项目草稿；可再次对照。'
           : comparisonOutcome === 'shortlisted'
-            ? '人工短名单仅保留在本页；可再次对照。'
+            ? '人工短名单已保存到项目草稿；可再次对照。'
             : '已看完，尚未选择保留或采用。'}</small>
       </span>}
       {measuredMotionAnalysis ? <section className={styles.boundaryPhaseCandidateMeasured} aria-label={`${label} 已实测动作证据`}>

@@ -623,6 +623,7 @@ v2/runtime/worker.err.log
 - `suppressDraftWritesRef` 覆盖项目 reset 与恢复的完整 effect 批次：reset 同步置 true，恢复完成后下一 macrotask 才解除。localStorage effect 与 autosave effect 在 true 时直接返回，防止同一 commit 中携带旧 `dirty=true` 的 effect 在 `setDirty(false)` 生效前写入空候选。真实候选回调发生在恢复后，因此正常保存不受影响。
 - 服务端把候选审核定义为草稿内追加式审计记忆：更新草稿时按 session key、再按 exact source key 合并 `measured_motion_evidence / comparison_outcomes`，传空对象或迟到标签页保存不能删除既有记录；同 exact key 的新一轮实测/人工结论可覆盖旧值。删除候选审核只通过丢弃整个草稿，普通保存没有破坏性删除语义。
 - 前端恢复也按 session 内的 `measuredMotionEvidence / comparisonOutcomes` 两张 exact-key map 深合并，不能让内存中同 session key 的空壳整体覆盖远端完整 session；远端记录保底，当前同 exact key 的新实测/结论优先。
+- 候选卡的人工作业提示同步改为“已保存到项目草稿”，不再沿用页面态时期“仅保留在本页”的错误文案；B 相位/滚动/转场试调本身仍保持不写草稿，只有候选审核证据和人工结果持久化。
 - 恢复优先级收敛为权威远端草稿优先：只要服务端草稿与当前 Timeline 基线匹配，就不允许 localStorage 以时间戳覆盖；本地草稿只在没有匹配远端草稿时兜底。候选结论保存后刷新曾复现服务端 session `1 → 0`，根因就是页面选中较新的旧本地空 session 并自动回写；不再依赖客户端/SQLite 跨时区时间比较来决定权威性。
 
 ## 9. 下一步
