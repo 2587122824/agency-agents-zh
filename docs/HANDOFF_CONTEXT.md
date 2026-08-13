@@ -613,7 +613,7 @@ v2/runtime/worker.err.log
 - 候选 session 不再由边界 effect 主动删除。素材、源窗、fps 或切点变化会形成新稳定 key，渲染和续办只读取当前精确 key，因此旧 session 只作为不可见审核记忆保留、不冒充当前证据；主动清理在 React 恢复时存在竞态，Browser 曾三次复现服务端 session `1 → 0`，会造成真实审核数据丢失，故取消该破坏性路径。
 - 同时移除页面态时代遗留的 `[items]` effect 中无条件 `replaceBoundaryCandidateReviewSessions({})`。草稿恢复必然更新 items，该路径会在每次刷新后清空刚恢复的会话；items 变化现在只关闭动作工具并清除临时观察 evidence，候选审核隔离完全由稳定 session key 负责。
 - 草稿恢复 effect 不再依赖整个 `workspace.data` 对象，只依赖稳定的 Timeline ID/row version、草稿 query 和本地 key。页面的项目列表周期刷新会产生新的 workspace 对象引用；旧依赖会反复执行恢复并在候选自动保存前后重放旧远端快照，造成 session 时序覆盖和多余 PUT。
-- localStorage 写入与 900ms API 自动保存均受同步 ref 门禁 `editorDraftRestoreCompleteRef`；项目切换 effect 先把 ref 置 false，再清空 state，远端/本地择优恢复全部字段后置 true。不能用异步 state 充当该门禁，否则项目重置 effect 与恢复 effect 同轮执行时，后写的 `setState(true)` 仍会让清空 state 的下一次 render 可保存。
+- 恢复安全最终不依赖独立“恢复完成”标志；写入继续由 `dirty + fingerprint` 门禁。关键是项目 reset/恢复幂等、同项目 session 合并与权威远端优先，避免额外 ref 在 effect 时序中形成新的真假竞态。
 - 项目重置 effect 以 `resetProjectIdRef` 保证每个 project ID 只执行一次。此前依赖稳定 callback，但 React 开发/并发 effect 语义仍可能在草稿恢复后再次执行同一项目的清空；幂等 project ID 门禁阻止同项目二次 reset，同时真正切换项目仍完整重置。
 - 草稿恢复 effect 以 `restoredDraftIdentityRef = projectId + timelineId + rowVersion` 幂等。保存 mutation/query cache 更新 `serverDraft.data` 后不能再次执行全量恢复，把异步回调刚写入的候选 session 替换为较早请求快照；只有项目或权威 Timeline 基线变化才重新恢复。
 - 同项目恢复候选 session 时以“恢复值在前、当前 ref 在后”合并，且项目 reset 不再清空该 ref；页面刷新若组件未卸载，当前已实测/结论不能被迟到的空远端或本地快照覆盖。恢复 fingerprint 用合并后的 session 计算，避免把合并态误判成新编辑再写空。真正 project ID 变化仍由页面级 key/稳定 session key 隔离，当前边界不会读取其他项目 session。

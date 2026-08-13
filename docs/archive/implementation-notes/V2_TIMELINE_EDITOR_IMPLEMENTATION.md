@@ -677,7 +677,7 @@ Alembic 修订：`20260716_09`。
 - 不主动删除旧候选 session；当前边界只读取精确稳定 key，旧 key 保留为不可见审计记忆。主动清理会因恢复 effect 时序把权威 session 回写为空。
 - 删除 `[items]` effect 的候选 session 全量清空；items 恢复或结构变化仍关闭当前动作工具，但不会删除父级审核记忆。
 - 恢复 effect 不依赖 `workspace.data` 整体对象，避免项目列表/工作区刷新反复重跑恢复并覆盖候选 state。
-- localStorage 与 API autosave 读取同步 `editorDraftRestoreCompleteRef`；不要用异步 state 门禁两个同轮恢复 effect。
+- 不使用独立恢复完成 flag；autosave 仍由 dirty/fingerprint 驱动，恢复安全靠幂等与 session 合并。
 - 项目 reset 用 `resetProjectIdRef` 按 project ID 幂等，防止同项目 effect 重放清空已恢复 session。
 - 草稿恢复用 `restoredDraftIdentityRef` 按项目/Timeline/row version 幂等，server draft data 引用变化不重放恢复。
 - 候选恢复合并 `{...restored, ...currentRef}`，当前 exact-key 记录优先；恢复 fingerprint 使用合并值。

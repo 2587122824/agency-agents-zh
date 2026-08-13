@@ -415,7 +415,7 @@ render 对每个 context 独立读取当前 outcome，派生 handling/recheck �
 - 候选 session 采用追加式审计记忆，不做页面 effect 主动删除。当前投影只按包含双方条目/素材/源窗、frame step、fps 的精确 session key 读取；结构变化自然读取新空 session，旧 key 不可见且不能参与当前结论。这样避免恢复时序竞态把已持久化审核回写为空，也保留回改到原合同后的人工进度。
 - `[items]` effect 仅关闭动作比较并清除临时连续性 ready evidence，不再清空父级候选 session；items 是草稿恢复的必经 state 更新，不能被解释为删除已恢复审核。结构隔离由 session key 而非破坏性 state reset 完成。
 - 草稿恢复 effect 的依赖排除 `workspace.data` 整体引用；只在基线 ID/row version、草稿 query 或 local key 变化时运行。项目列表轮询更新 query cache 不能重放恢复过程或覆盖当前候选 session。
-- `editorDraftRestoreCompleteRef` 是同步草稿写入总门禁：项目重置 effect 立即写 false，恢复 effect 完整注入 items、连续性和候选 session 后写 true。localStorage 与 API autosave 每次执行直接读取 ref，避免两个 effect 同轮排队的 state 更新合并后放行中间空 state。
+- 草稿写入不使用额外恢复完成 flag，继续只消费 `dirty + canonical fingerprint`。恢复安全由项目 reset/恢复幂等、远端权威与 session 合并保证，减少 effect 顺序依赖。
 - `resetProjectIdRef` 使页面级 reset 对每个 project ID 幂等；同项目 effect 重放不能在草稿恢复后再次清空 items/session，project ID 真正变化时才执行完整 reset。
 - `restoredDraftIdentityRef` 使草稿恢复按 `projectId/timelineId/rowVersion` 幂等；同一基线的 server draft query/mutation 数据引用变化不重放整份恢复，避免旧请求快照覆盖候选回调。基线变化会使用新 identity 正常恢复。
 - 候选 session 恢复按 `{...restored, ...currentRef}` 合并，当前页面已登记的 exact-key 记录优先于迟到快照；项目 reset 不破坏 ref。恢复基线 fingerprint 使用合并结果，避免恢复后无意义 PUT。跨项目 session 因 key 含 project ID 且当前投影只查精确 key，不会泄漏到当前审核。
