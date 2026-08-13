@@ -3258,7 +3258,6 @@ export function EditorPrototypePage() {
     setBoundaryContinuityIssueContexts({})
     setBoundaryContinuityObservations({})
     setBoundaryContinuityReadyEvidence({})
-    replaceBoundaryCandidateReviewSessions({})
     editorDraftRestoreCompleteRef.current = false
     setBoundaryContinuityObservations({})
     setBoundaryContinuityReadyEvidence({})
@@ -3378,12 +3377,27 @@ export function EditorPrototypePage() {
     setBoundaryContinuityOutcomes(restoredContinuityOutcomes)
     setBoundaryContinuityIssueContexts(restoredContinuityIssueContexts)
     setBoundaryContinuityObservations(restoredContinuityObservations)
-    replaceBoundaryCandidateReviewSessions(restoredCandidateReviewSessions)
+    const mergedCandidateReviewSessions = {
+      ...restoredCandidateReviewSessions,
+      ...boundaryCandidateReviewSessionsRef.current,
+    }
+    replaceBoundaryCandidateReviewSessions(mergedCandidateReviewSessions)
     setBoundaryContinuityReadyEvidence({})
     setDirty(Boolean(remoteItems || localRestored))
     setLastAutoSavedAt(useRemote && remote ? remote.updated_at : null)
-    setLastAutoSavedFingerprint(useRemote ? remoteFingerprint : null)
-    setLastAutoSaveAttemptFingerprint(useRemote ? remoteFingerprint : null)
+    const restoredFingerprint = editorDraftFingerprint(
+      sourceTimeline,
+      restoredItems,
+      restoredPlayheadMs,
+      restoredSnapEnabled,
+      restoredZoom,
+      restoredContinuityOutcomes,
+      restoredContinuityIssueContexts,
+      restoredContinuityObservations,
+      mergedCandidateReviewSessions,
+    )
+    setLastAutoSavedFingerprint(useRemote ? restoredFingerprint : null)
+    setLastAutoSaveAttemptFingerprint(useRemote ? restoredFingerprint : null)
     setHistory([])
     setFuture([])
     setSelectedIndex(0)

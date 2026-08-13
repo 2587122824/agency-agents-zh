@@ -616,6 +616,7 @@ v2/runtime/worker.err.log
 - localStorage 写入与 900ms API 自动保存均受同步 ref 门禁 `editorDraftRestoreCompleteRef`；项目切换 effect 先把 ref 置 false，再清空 state，远端/本地择优恢复全部字段后置 true。不能用异步 state 充当该门禁，否则项目重置 effect 与恢复 effect 同轮执行时，后写的 `setState(true)` 仍会让清空 state 的下一次 render 可保存。
 - 项目重置 effect 以 `resetProjectIdRef` 保证每个 project ID 只执行一次。此前依赖稳定 callback，但 React 开发/并发 effect 语义仍可能在草稿恢复后再次执行同一项目的清空；幂等 project ID 门禁阻止同项目二次 reset，同时真正切换项目仍完整重置。
 - 草稿恢复 effect 以 `restoredDraftIdentityRef = projectId + timelineId + rowVersion` 幂等。保存 mutation/query cache 更新 `serverDraft.data` 后不能再次执行全量恢复，把异步回调刚写入的候选 session 替换为较早请求快照；只有项目或权威 Timeline 基线变化才重新恢复。
+- 同项目恢复候选 session 时以“恢复值在前、当前 ref 在后”合并，且项目 reset 不再清空该 ref；页面刷新若组件未卸载，当前已实测/结论不能被迟到的空远端或本地快照覆盖。恢复 fingerprint 用合并后的 session 计算，避免把合并态误判成新编辑再写空。真正 project ID 变化仍由页面级 key/稳定 session key 隔离，当前边界不会读取其他项目 session。
 - 恢复优先级收敛为权威远端草稿优先：只要服务端草稿与当前 Timeline 基线匹配，就不允许 localStorage 以时间戳覆盖；本地草稿只在没有匹配远端草稿时兜底。候选结论保存后刷新曾复现服务端 session `1 → 0`，根因就是页面选中较新的旧本地空 session 并自动回写；不再依赖客户端/SQLite 跨时区时间比较来决定权威性。
 
 ## 9. 下一步
