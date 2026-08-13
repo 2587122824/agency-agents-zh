@@ -3230,9 +3230,11 @@ export function EditorPrototypePage() {
   const sourceTimeline = workspace.data?.timelines[0] ?? null
   const localDraftKey = `agency-studio.editor-draft.${projectId}`
   const resetProjectIdRef = useRef<string | null>(null)
+  const restoredDraftIdentityRef = useRef<string | null>(null)
   useEffect(() => {
     if (resetProjectIdRef.current === projectId) return
     resetProjectIdRef.current = projectId
+    restoredDraftIdentityRef.current = null
     setItems([])
     setHistory([])
     setFuture([])
@@ -3273,6 +3275,9 @@ export function EditorPrototypePage() {
 
   useEffect(() => {
     if (!sourceTimeline || !workspace.data || serverDraft.isPending) return
+    const restoreIdentity = [projectId, sourceTimeline.id, sourceTimeline.row_version].join(':')
+    if (restoredDraftIdentityRef.current === restoreIdentity) return
+    restoredDraftIdentityRef.current = restoreIdentity
     let localRestored: LocalEditorDraft | null = null
     try {
       const raw = window.localStorage.getItem(localDraftKey)
