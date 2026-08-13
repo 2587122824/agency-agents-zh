@@ -3787,7 +3787,6 @@ export function EditorPrototypePage() {
   useEffect(() => {
     setBoundaryActionComparisonKey(null)
     setBoundaryContinuityReadyEvidence({})
-    replaceBoundaryCandidateReviewSessions({})
   }, [items])
 
   useEffect(() => {

@@ -675,4 +675,5 @@ Alembic 修订：`20260716_09`。
 - 后端拒绝额外字段、非法 outcome、超长 key、错误九宫格/节奏数组和越界数值；候选审核不会成为 Timeline 连续性通过证据。
 - SPA fallback 的 `index.html` 响应使用 `Cache-Control: no-store`，使刷新必定获取当前 hash bundle；这是严格草稿合同发布边界的一部分，不在 API 中兼容缺失的新字段。
 - 不主动删除旧候选 session；当前边界只读取精确稳定 key，旧 key 保留为不可见审计记忆。主动清理会因恢复 effect 时序把权威 session 回写为空。
+- 删除 `[items]` effect 的候选 session 全量清空；items 恢复或结构变化仍关闭当前动作工具，但不会删除父级审核记忆。
 - 只要远端草稿与当前 Timeline 基线匹配就始终优先；localStorage 仅在无匹配远端草稿时兜底，不能按客户端时间覆盖权威候选审核。

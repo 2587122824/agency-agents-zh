@@ -611,6 +611,7 @@ v2/runtime/worker.err.log
 - 邻帧候选审核会话已纳入权威项目草稿：`editor-draft-session.v8 / editor-local-draft.v11` 新增结构化 `candidate_review_sessions`，逐 session 保存 exact-key 动作分析和 `completed / kept_baseline / shortlisted` 人工结果。后端严格校验 key 长度、候选数量、完整动作结构、九宫格/节奏数组长度、数值范围、额外字段和结果枚举；迁移 `20260813_50` 显式新增 JSON 列，并把现有开发草稿审核会话重建为空，不保留 v7 运行时兼容。首次只读打开零写入；只有证据或结论真实变化才置脏并自动保存，同值探针回调不重复保存。刷新恢复候选审核进度，但不恢复扫描侧、±4 展开、当前 B、播放、pending 自动对照或结论门禁；素材、源窗、fps 或切点变化因稳定 session key 改变而读取新空会话，失效会话从草稿清除。候选结果仍不等同正式连续性通过证据，不参与排序、推荐或自动采用。
 - SPA fallback 的 `index.html` 响应显式使用 `Cache-Control: no-store`，保证草稿合同升级并重启后刷新页面必定获取引用新 hash bundle 的入口；带内容 hash 的 `/assets/*` 仍保持静态资源路径。Browser 首轮验收正是从旧入口加载 `/assets/index-B0VXdAWm.js` 后触发 v7 payload 对 v8 API 的 422，由该发布修复消除，而不是在新 API 增加旧字段缺失兼容。
 - 候选 session 不再由边界 effect 主动删除。素材、源窗、fps 或切点变化会形成新稳定 key，渲染和续办只读取当前精确 key，因此旧 session 只作为不可见审核记忆保留、不冒充当前证据；主动清理在 React 恢复时存在竞态，Browser 曾三次复现服务端 session `1 → 0`，会造成真实审核数据丢失，故取消该破坏性路径。
+- 同时移除页面态时代遗留的 `[items]` effect 中无条件 `replaceBoundaryCandidateReviewSessions({})`。草稿恢复必然更新 items，该路径会在每次刷新后清空刚恢复的会话；items 变化现在只关闭动作工具并清除临时观察 evidence，候选审核隔离完全由稳定 session key 负责。
 - 恢复优先级收敛为权威远端草稿优先：只要服务端草稿与当前 Timeline 基线匹配，就不允许 localStorage 以时间戳覆盖；本地草稿只在没有匹配远端草稿时兜底。候选结论保存后刷新曾复现服务端 session `1 → 0`，根因就是页面选中较新的旧本地空 session 并自动回写；不再依赖客户端/SQLite 跨时区时间比较来决定权威性。
 
 ## 9. 下一步
