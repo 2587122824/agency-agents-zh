@@ -56,5 +56,5 @@ def frontend(path: str):
         return FileResponse(target)
     index = FRONTEND_DIST / "index.html"
     if index.is_file():
-        return FileResponse(index)
+        return FileResponse(index, headers={"Cache-Control": "no-store"})
     return {"message": "Frontend is not built. Run npm.cmd run build in v2/frontend."}

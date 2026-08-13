@@ -673,3 +673,4 @@ Alembic 修订：`20260716_09`。
 - 前端首次恢复只写父级审核缓存；扫描侧、±4 展开、当前 B、媒体状态、pending 与结论门禁不恢复。
 - 动作探针返回相同对象或重复写入同一结果时不置脏；真实增改及失效 session 删除才进入 localStorage 和 900ms API 自动保存。
 - 后端拒绝额外字段、非法 outcome、超长 key、错误九宫格/节奏数组和越界数值；候选审核不会成为 Timeline 连续性通过证据。
+- SPA fallback 的 `index.html` 响应使用 `Cache-Control: no-store`，使刷新必定获取当前 hash bundle；这是严格草稿合同发布边界的一部分，不在 API 中兼容缺失的新字段。

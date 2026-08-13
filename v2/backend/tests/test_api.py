@@ -8991,3 +8991,9 @@ def test_provider_readiness_reports_historical_runninghub_contract_without_mutat
         assert workflow is not None
         assert workflow.node_info_list == legacy_bindings
     assert "must-never-be-returned" not in response.text
+
+
+def test_spa_entry_disables_caching(client: TestClient) -> None:
+    response = client.get("/editor")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
