@@ -1757,7 +1757,8 @@ function BoundaryActionComparison({
     ? legalPhaseCandidatesForSide(phaseCandidateScanSide, allPhaseCandidateFrameOffsets)
     : []
   const nearbyPhaseCandidates = allNearbyPhaseCandidates.filter(candidate => phaseCandidateScanExpanded || Math.abs(candidate.frameOffset) <= 2)
-  const expandablePhaseCandidateCount = allNearbyPhaseCandidates.filter(candidate => Math.abs(candidate.frameOffset) > 2).length
+  const expandablePhaseCandidates = allNearbyPhaseCandidates.filter(candidate => Math.abs(candidate.frameOffset) > 2)
+  const expandablePhaseCandidateCount = expandablePhaseCandidates.length
   const reviewedPhaseCandidateCount = phaseCandidateScanSide
     ? nearbyPhaseCandidates.filter(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)]).length
     : 0
@@ -1794,15 +1795,25 @@ function BoundaryActionComparison({
     ? nearbyPhaseCandidates.find(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)] === 'shortlisted') ?? null
     : null
   const nextReviewPhaseCandidate = nextUnreviewedPhaseCandidate ?? nextUndecidedPhaseCandidate ?? nextShortlistedPhaseCandidate
+  const nextExpandablePhaseCandidate = phaseCandidateScanSide
+    ? pendingPhaseCandidateForSide(phaseCandidateScanSide, expandablePhaseCandidates)
+    : null
+  const pendingExpandablePhaseCandidateCount = phaseCandidateScanSide
+    ? expandablePhaseCandidates.filter(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)] !== 'kept_baseline').length
+    : 0
   const otherGuidedScanSide = phaseCandidateScanSide === 'left' ? 'right' : 'left'
   const otherGuidedScanCandidates = otherGuidedScanSide === 'left' ? leftDefaultPhaseCandidates : rightDefaultPhaseCandidates
   const otherGuidedScanCandidateCount = phaseCandidateScanSide === 'left'
     ? rightPendingDefaultPhaseCandidateCount
     : leftPendingDefaultPhaseCandidateCount
+  const activePhaseCandidateIsExpanded = Math.abs(activePhaseCandidateDeltaMs) > 2 * frameStepMs
+  const sameSideContinuationCandidates = phaseCandidateScanExpanded && activePhaseCandidateIsExpanded
+    ? expandablePhaseCandidates
+    : nearbyPhaseCandidates
   const nextPhaseCandidateAfterDecision = phaseCandidateScanSide && activePhaseCandidateSourceKey
-    ? pendingPhaseCandidateForSide(phaseCandidateScanSide, nearbyPhaseCandidates, activePhaseCandidateSourceKey)
+    ? pendingPhaseCandidateForSide(phaseCandidateScanSide, sameSideContinuationCandidates, activePhaseCandidateSourceKey)
     : null
-  const nextOtherGuidedPhaseCandidateAfterDecision = guidedIssueLabel && activePhaseCandidateSourceKey
+  const nextOtherGuidedPhaseCandidateAfterDecision = guidedIssueLabel && activePhaseCandidateSourceKey && !activePhaseCandidateIsExpanded
     ? pendingPhaseCandidateForSide(otherGuidedScanSide, otherGuidedScanCandidates)
     : null
   const candidateDecisionWillContinue = Boolean(
@@ -2317,7 +2328,12 @@ function BoundaryActionComparison({
   const expandPhaseCandidateScan = () => {
     if (!phaseCandidateScanSide || phaseCandidateScanExpanded || hasComparisonTrial || !expandablePhaseCandidateCount) return
     setPhaseCandidateScanExpanded(true)
-    onNotice(`已显式扩展${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}扫描到前后 4 帧；新增候选仍按时间顺序人工对照，不排序或推荐。`)
+    if (nextExpandablePhaseCandidate) {
+      selectPhaseCandidate(phaseCandidateScanSide, nextExpandablePhaseCandidate.deltaMs, true)
+      onNotice(`已显式扩展${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}到 ±4 帧，并按固定顺序开始下一个额外待处理候选的 A→B 对照；不排序或推荐。`)
+      return
+    }
+    onNotice(`已显式扩展${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}到 ±4 帧；额外合法候选均已保留 A，只展开供人工复看，不自动播放。`)
   }
 
   const adjustRollTrial = (requestedDeltaMs: number) => {
@@ -2673,12 +2689,12 @@ function BoundaryActionComparison({
           onClick={() => togglePhaseCandidateScan(otherGuidedScanSide)}
         >继续检查{otherGuidedScanSide === 'left' ? '前镜' : '后镜'}候选（{otherGuidedScanCandidateCount}）</button>}
         {!phaseCandidateScanExpanded && expandablePhaseCandidateCount > 0 && <div className={styles.boundaryPhaseScanExpansion}>
-          <span><strong>近邻仍不顺？</strong><small>可再挂载 {expandablePhaseCandidateCount} 个 ±3/±4 帧合法候选。</small></span>
+          <span><strong>近邻仍不顺？</strong><small>±3/±4 帧额外候选：待处理 {pendingExpandablePhaseCandidateCount} / 合法 {expandablePhaseCandidateCount}。</small></span>
           <button
             disabled={hasComparisonTrial}
             title={hasComparisonTrial ? '请先处理或清除当前 B，再扩展候选范围。' : undefined}
             onClick={expandPhaseCandidateScan}
-          >扩展到 ±4 帧</button>
+          >{nextExpandablePhaseCandidate ? '扩展并对照下一候选' : '扩展到 ±4 帧供复看'}</button>
         </div>}
         {phaseCandidateScanExpanded && <small className={styles.boundaryPhaseScanExpandedNote}>已扩展到 ±4 帧；审核进度与短名单继续沿用同一页面会话。</small>}
         {nearbyPhaseCandidates.length > 0 && <nav className={styles.boundaryPhaseCandidateNavigator} aria-label={`${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}邻帧候选快速导航`}>
