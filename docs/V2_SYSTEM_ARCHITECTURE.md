@@ -421,4 +421,5 @@ render 对每个 context 独立读取当前 outcome，派生 handling/recheck �
 - 候选 session 恢复按 `{...restored, ...currentRef}` 合并，当前页面已登记的 exact-key 记录优先于迟到快照；项目 reset 不破坏 ref。恢复基线 fingerprint 使用合并结果，避免恢复后无意义 PUT。跨项目 session 因 key 含 project ID 且当前投影只查精确 key，不会泄漏到当前审核。
 - `candidateReviewSessionsLoadedRef` 是候选字段的权威加载门禁：project reset=false，恢复或真实候选登记=true；唯一 `saveCurrentEditorDraft` 在 false 时拒绝写 API。首次恢复使用远端/本地原值，只有 ref 已 loaded 时才合并当前记录覆盖迟到快照，杜绝中间空 candidate payload。
 - 恢复 effect 直接同步赋值 `boundaryCandidateReviewSessionsRef.current` 后再 setState；API 保存读取 ref 对应的 current session，不能依赖异步 render 闭包中的旧 state。
+- 匹配远端草稿恢复后设置 `dirty=false`，不触发首屏 autosave；仅 localStorage fallback 设置 `dirty=true`。权威远端恢复是读取，不是编辑事件。
 - 恢复权威顺序为：匹配当前 Timeline 基线的远端 `EditorDraftSession` 始终优先，localStorage 只在无匹配远端草稿时作为浏览器崩溃兜底。客户端时间戳不能把本地副本提升到权威远端之上，避免旧空候选 session 被自动回写覆盖服务端审核进度。

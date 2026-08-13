@@ -619,6 +619,7 @@ v2/runtime/worker.err.log
 - 同项目恢复候选 session 时以“恢复值在前、当前 ref 在后”合并，且项目 reset 不再清空该 ref；页面刷新若组件未卸载，当前已实测/结论不能被迟到的空远端或本地快照覆盖。恢复 fingerprint 用合并后的 session 计算，避免把合并态误判成新编辑再写空。真正 project ID 变化仍由页面级 key/稳定 session key 隔离，当前边界不会读取其他项目 session。
 - `candidateReviewSessionsLoadedRef` 明确标记候选 session 是否已从远端/本地恢复或由本页真实候选回调产生。项目切换先置 false；恢复完成/真实登记后置 true；`saveCurrentEditorDraft` 在 false 时拒绝保存。合并只在当前 ref 已 loaded 时让当前记录覆盖恢复值，避免初始空 ref 吞掉远端；该门禁直接位于唯一 API 保存函数，覆盖 autosave 与显式生成版本路径。
 - 恢复 effect 注入候选会话时直接同步写 `boundaryCandidateReviewSessionsRef.current` 再 setState，不经 `replaceBoundaryCandidateReviewSessions` callback。这样 ref 在恢复 effect 内立即拥有权威值，随后同轮或迟到的保存读取不会看到旧空 ref；稳定 callback 仅留给真实候选回调。
+- 恢复匹配的远端草稿后 `dirty=false`，因为它已经是权威已保存状态，首屏不得自动 PUT；只有服务端没有匹配草稿而从 localStorage 兜底恢复时 `dirty=true`，等待同步上传。此前把任意 remote items 也设脏，是刷新后 session `1 → 0` 的最终触发条件。
 - 恢复优先级收敛为权威远端草稿优先：只要服务端草稿与当前 Timeline 基线匹配，就不允许 localStorage 以时间戳覆盖；本地草稿只在没有匹配远端草稿时兜底。候选结论保存后刷新曾复现服务端 session `1 → 0`，根因就是页面选中较新的旧本地空 session 并自动回写；不再依赖客户端/SQLite 跨时区时间比较来决定权威性。
 
 ## 9. 下一步

@@ -3386,7 +3386,7 @@ export function EditorPrototypePage() {
     setBoundaryCandidateReviewSessions(mergedCandidateReviewSessions)
     candidateReviewSessionsLoadedRef.current = true
     setBoundaryContinuityReadyEvidence({})
-    setDirty(Boolean(remoteItems || localRestored))
+    setDirty(Boolean(localRestored && !useRemote))
     setLastAutoSavedAt(useRemote && remote ? remote.updated_at : null)
     const restoredFingerprint = editorDraftFingerprint(
       sourceTimeline,
