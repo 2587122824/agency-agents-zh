@@ -1583,7 +1583,7 @@ function BoundaryActionComparison({
   onApplyPhasePair: (leftDeltaMs: number, rightDeltaMs: number) => void
   candidateReviewSessionKey: string
   candidateReviewSession: BoundaryCandidateReviewSession
-  guidedScanRequest: { requestToken: number; issueLabel: string } | null
+  guidedScanRequest: { requestToken: number; issueLabel: string; intent: 'issue' | 'resume' } | null
   onConsumeGuidedScanRequest: (requestToken: number) => void
   onRememberCandidateMotionEvidence: (sessionKey: string, sourceKey: string, analysis: BoundaryMotionAnalysis) => void
   onRememberCandidateComparisonOutcome: (sessionKey: string, sourceKey: string, outcome: BoundaryCandidateComparisonOutcome) => void
@@ -1991,6 +1991,31 @@ function BoundaryActionComparison({
 
   useEffect(() => {
     if (!guidedScanRequest) return
+    if (guidedScanRequest.intent === 'resume') {
+      const resumableCandidate = (side: 'left' | 'right') => legalPhaseCandidatesForSide(side, allPhaseCandidateFrameOffsets)
+        .find(candidate => {
+          const sourceKey = candidateMotionSourceKey(side, candidate.deltaMs)
+          const outcome = candidateComparisonOutcomes[sourceKey]
+          return outcome === 'completed'
+            || outcome === 'shortlisted'
+            || (!outcome && Boolean(measuredCandidateMotionEvidence[sourceKey]))
+        })
+      const leftCandidate = resumableCandidate('left')
+      const rightCandidate = resumableCandidate('right')
+      const preferredSide = leftCandidate ? 'left' : rightCandidate ? 'right' : null
+      const preferredCandidate = leftCandidate ?? rightCandidate
+      setGuidedIssueLabel(null)
+      setPhaseCandidateScanSide(preferredSide)
+      setPhaseCandidateScanExpanded(Boolean(preferredCandidate && Math.abs(preferredCandidate.frameOffset) > 2))
+      onNotice(preferredSide && preferredCandidate
+        ? `已打开${preferredSide === 'left' ? '前镜' : '后镜'} ${preferredCandidate.frameOffset < 0 ? '−' : '+'}${Math.abs(preferredCandidate.frameOffset)} 帧待办并定位候选卡；未设置 B、未播放，也未作出结论。`
+        : `当前切点没有仍与画面合同匹配的候选审核待办。`)
+      if (preferredSide && preferredCandidate) {
+        requestAnimationFrame(() => focusPhaseCandidate(preferredSide, preferredCandidate.frameOffset))
+      }
+      onConsumeGuidedScanRequest(guidedScanRequest.requestToken)
+      return
+    }
     const preferredSide = leftPendingDefaultPhaseCandidateCount > 0
       ? 'left'
       : rightPendingDefaultPhaseCandidateCount > 0
@@ -2010,8 +2035,11 @@ function BoundaryActionComparison({
     onConsumeGuidedScanRequest(guidedScanRequest.requestToken)
   }, [
     guidedScanRequest,
+    candidateComparisonOutcomes,
+    candidateMotionSourceKey,
     leftDefaultPhaseCandidates.length,
     leftPendingDefaultPhaseCandidateCount,
+    measuredCandidateMotionEvidence,
     onConsumeGuidedScanRequest,
     onNotice,
     rightDefaultPhaseCandidates.length,
@@ -3077,6 +3105,7 @@ export function EditorPrototypePage() {
     checkId: string
     checkLabel: string
     requestToken: number
+    intent: 'issue' | 'resume'
   } | null>(null)
   const [boundaryCandidateReviewSessions, setBoundaryCandidateReviewSessions] = useState<Record<string, BoundaryCandidateReviewSession>>({})
   const candidateReviewSessionsLoadedRef = useRef(false)
@@ -4462,7 +4491,14 @@ export function EditorPrototypePage() {
   const focusCandidateReviewFollowUpAt = (targetIndex: number) => {
     const target = focusBoundaryForReviewAt(targetIndex, 'action')
     if (!target) return
-    setNotice(`已定位候选审核待办：${target.left.label} → ${target.right.label}；请继续同步动作审核。`)
+    setBoundaryCandidateGuidanceRequest({
+      boundaryKey: target.key,
+      checkId: 'candidate-review-follow-up',
+      checkLabel: '候选审核待办',
+      requestToken: Date.now(),
+      intent: 'resume',
+    })
+    setNotice(`正在定位候选审核待办：${target.left.label} → ${target.right.label}。`)
   }
 
   const focusIncompleteBoundaryContinuityReviewAt = (targetIndex: number) => {
@@ -4491,6 +4527,7 @@ export function EditorPrototypePage() {
           checkId: firstAdjustment.id,
           checkLabel: firstAdjustment.label,
           requestToken: (current?.requestToken ?? 0) + 1,
+          intent: 'issue',
         }))
       }
     }
@@ -4525,6 +4562,7 @@ export function EditorPrototypePage() {
         checkId,
         checkLabel,
         requestToken: (current?.requestToken ?? 0) + 1,
+        intent: 'issue',
       }))
     }
     setNotice(`正在处理“${checkLabel}”：${target.left.label} → ${target.right.label}；已打开${continuityReviewModeLabel(mode)}，不会自动修改切点。`)
@@ -7634,6 +7672,13 @@ export function EditorPrototypePage() {
                           setBoundaryFrameOverlayKey(null)
                           setBoundaryFrameStripKey(null)
                           setBoundaryActionComparisonKey(boundaryKey)
+                          setBoundaryCandidateGuidanceRequest({
+                            boundaryKey,
+                            checkId: 'candidate-review-follow-up',
+                            checkLabel: '候选审核待办',
+                            requestToken: Date.now(),
+                            intent: 'resume',
+                          })
                         }}
                       >继续审核</button>
                     </section>}
@@ -7691,6 +7736,13 @@ export function EditorPrototypePage() {
                               setBoundaryFrameOverlayKey(null)
                               setBoundaryFrameStripKey(null)
                               setBoundaryActionComparisonKey(boundaryKey)
+                              setBoundaryCandidateGuidanceRequest({
+                                boundaryKey,
+                                checkId: 'candidate-review-follow-up',
+                                checkLabel: '候选审核待办',
+                                requestToken: Date.now(),
+                                intent: 'resume',
+                              })
                             }}
                           >继续审核</button>}
                         </section>}
@@ -7771,6 +7823,7 @@ export function EditorPrototypePage() {
                            ? {
                              requestToken: boundaryCandidateGuidanceRequest.requestToken,
                              issueLabel: boundaryCandidateGuidanceRequest.checkLabel,
+                             intent: boundaryCandidateGuidanceRequest.intent,
                            }
                            : null}
                          onConsumeGuidedScanRequest={requestToken => setBoundaryCandidateGuidanceRequest(current => (
