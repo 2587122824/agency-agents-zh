@@ -4117,8 +4117,15 @@ export function EditorPrototypePage() {
   const validationErrors = lastValidation?.validation_report
     ?? sourceTimeline?.validation_report
     ?? []
-  const structuralTodoCount = Math.max(unresolvedCount, validationErrors.length)
-  const editorTodoCount = structuralTodoCount + continuityReviewIssueCount
+  const primaryEditorTaskLabel = shotOrderIssues.length > 0
+    ? `修复 ${shotOrderIssues.length} 处镜头顺序`
+    : unresolvedCount > 0
+      ? `处理 ${unresolvedCount} 处画面缺口`
+      : validationErrors.length > 0
+        ? `处理 ${validationErrors.length} 项时间线问题`
+        : unresolvedBoundaryContinuityReviews.length > 0
+          ? `复检 ${unresolvedBoundaryContinuityReviews.length} 个切点`
+          : null
   const autoSaveFingerprint = useMemo(
     () => editorDraftFingerprint(
       sourceTimeline,
@@ -4752,6 +4759,15 @@ export function EditorPrototypePage() {
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
       boundaryInspectorEntryRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     }))
+  }
+
+  const focusFirstUnresolvedGap = () => {
+    const gap = mainItems.find(item => !item.asset_id)
+    if (!gap) return
+    setBoundaryInspectorOpen(false)
+    selectItem(gap)
+    setNotice(`已定位画面缺口：${seconds(gap.timeline_out_ms - gap.timeline_in_ms)}。请先完成结构与素材取舍，再复检新增切点。`)
+    window.requestAnimationFrame(() => inspectorRef.current?.scrollTo({ top: 0, behavior: 'smooth' }))
   }
 
   const focusBoundaryForReviewAt = (targetIndex: number, mode: BoundaryContinuityReviewMode) => {
@@ -7374,18 +7390,18 @@ export function EditorPrototypePage() {
         <button title="重做" disabled={!future.length} onClick={redo}><Redo2 /></button>
         {dirty && <button title="丢弃自动保存的项目草稿" onClick={discardDraft}><RotateCcw /></button>}
         <button className={styles.primaryAction} disabled={saveAndValidate.isPending} onClick={() => {
-          if (nextUnresolvedBoundaryContinuityReview) {
-            focusIncompleteBoundaryContinuityReviewAt(nextUnresolvedBoundaryContinuityReview.index)
-          }
-          else if (validationErrors.length || unresolvedCount) setValidationOpen(true)
+          if (firstShotOrderIssueBoundaryIndex >= 0) focusShotOrderIssueAt(firstShotOrderIssueBoundaryIndex)
+          else if (unresolvedCount > 0) focusFirstUnresolvedGap()
+          else if (validationErrors.length > 0) setValidationOpen(true)
+          else if (nextUnresolvedBoundaryContinuityReview) focusIncompleteBoundaryContinuityReviewAt(nextUnresolvedBoundaryContinuityReview.index)
           else if (dirty) setConfirmSaveOpen(true)
           else setNotice('当前版本已经通过检查，可以进入确认阶段。')
         }}>
-          {editorTodoCount > 0 ? <AlertTriangle /> : <CheckCircle2 />}
+          {primaryEditorTaskLabel ? <AlertTriangle /> : <CheckCircle2 />}
           {saveAndValidate.isPending
             ? '正在生成…'
-            : editorTodoCount > 0
-              ? `处理 ${editorTodoCount} 项待办`
+            : primaryEditorTaskLabel
+              ? primaryEditorTaskLabel
               : dirty
                 ? '生成可导出版本'
                 : '版本已通过'}
