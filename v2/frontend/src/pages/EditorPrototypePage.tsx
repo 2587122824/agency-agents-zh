@@ -430,6 +430,7 @@ function analyzeFrameMotion(firstVideo: HTMLVideoElement, secondVideo: HTMLVideo
 
 type ContinuityRelation = 'same_moment' | 'time_jump' | 'location_change' | 'outfit_change'
 type BoundaryContinuityReviewMode = 'frames' | 'overlay' | 'action'
+const DEFAULT_EDITOR_NOTICE = '当前时间线已同步；开始调整后会自动保存到项目。'
 
 const CONTINUITY_RELATION_COPY: Record<ContinuityRelation, { label: string; tone: 'locked' | 'change'; summary: string }> = {
   same_moment: { label: '同一时刻', tone: 'locked', summary: '重点核对主体、动作阶段和运动方向是否连续。' },
@@ -445,17 +446,17 @@ const CONTINUITY_CHECKS: Record<ContinuityRelation, Array<{ id: string; label: s
     { id: 'eyeline', label: '构图、视线与主体位置没有异常跳变' },
   ],
   time_jump: [
-    { id: 'jump-readable', label: '时间跳转在画面或叙事中足够清楚' },
+    { id: 'jump-readable', label: '1×观看后时间跳转清楚、切点节奏自然' },
     { id: 'subject', label: '跳转前后主体身份仍可辨认' },
     { id: 'new-information', label: '后镜提供了符合跳转意图的新信息' },
   ],
   location_change: [
-    { id: 'location-readable', label: '新地点在切点后能够被清楚识别' },
+    { id: 'location-readable', label: '1×观看后地点切换清楚、切点节奏自然' },
     { id: 'subject', label: '跨地点的主体与叙事承接一致' },
     { id: 'orientation', label: '空间方向变化不会造成误读' },
   ],
   outfit_change: [
-    { id: 'outfit-readable', label: '服装变化明确且不是生成漂移' },
+    { id: 'outfit-readable', label: '1×观看后换装意图清楚、切点节奏自然' },
     { id: 'reason', label: '换装与时间、地点或剧情变化一致' },
     { id: 'subject', label: '人物身份和其他稳定特征保持一致' },
   ],
@@ -468,7 +469,7 @@ const GENERAL_CONTINUITY_CHECKS = [
 ]
 
 function continuityReviewModeForCheckId(checkId: string): BoundaryContinuityReviewMode {
-  if (checkId === 'motion') return 'action'
+  if (checkId === 'motion' || checkId === 'jump-readable' || checkId === 'location-readable' || checkId === 'outfit-readable') return 'action'
   if (checkId === 'eyeline' || checkId === 'orientation') return 'overlay'
   return 'frames'
 }
@@ -2581,12 +2582,16 @@ function BoundaryActionComparison({
     </header>
     <section className={styles.boundaryPrimaryTask} aria-label="当前同步动作任务">
       <span>
-        <strong>{phaseDecisionReady ? '对照已完成，请选择结果' : hasComparisonTrial ? 'B 已准备，下一步完成 A→B 对照' : guidedIssueLabel ? `正在处理：${guidedIssueLabel}` : '先检查最接近切点的邻帧'}</strong>
+        <strong>{phaseDecisionReady ? '对照已完成，请选择结果' : hasComparisonTrial ? 'B 已准备，下一步完成 A→B 对照' : guidedIssueLabel ? `完成两次观看：${guidedIssueLabel}` : '先检查最接近切点的邻帧'}</strong>
         <small>{phaseCandidateScanSide
           ? `${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}已对照 ${reviewedPhaseCandidateCount}/${nearbyPhaseCandidates.length}${undecidedPhaseCandidateCount ? ` · 待决定 ${undecidedPhaseCandidateCount}` : ''}`
-          : hasComparisonTrial ? tunedTrialSummary : '只在你打开后加载候选；系统不排序、不推荐，也不会自动设置 B。'}</small>
+          : hasComparisonTrial ? tunedTrialSummary : guidedIssueLabel ? '先并排看动作阶段，再按真实顺序看完整切点；两次都只记录观看证据，不修改时间线。' : '只在你打开后加载候选；系统不排序、不推荐，也不会自动设置 B。'}</small>
       </span>
-      {!hasComparisonTrial && !phaseDecisionReady && <button type="button" onClick={() => setCandidateDetailsOpen(value => !value)}>
+      {guidedIssueLabel && !hasComparisonTrial && !phaseDecisionReady && <div className={styles.boundaryPrimaryTaskActions}>
+        <button type="button" disabled={comparisonDurationMs <= 0} onClick={playing ? pauseMedia : startComparison}>{playing ? '暂停同步播放' : progressMs > 0 ? '重播同步动作' : '同步播放动作'}</button>
+        <button type="button" disabled={sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady} onClick={sequencePlaying && phaseSequenceCompareStage === 'idle' ? pauseSequenceMedia : startSequencePreview}>{sequencePlaying && phaseSequenceCompareStage === 'idle' ? '暂停顺序试播' : sequenceProgressMs > 0 ? '重播顺序切点' : '顺序试播切点'}</button>
+      </div>}
+      {!guidedIssueLabel && !hasComparisonTrial && !phaseDecisionReady && <button type="button" onClick={() => setCandidateDetailsOpen(value => !value)}>
         {candidateDetailsOpen ? '收起候选' : phaseCandidateScanSide ? '继续候选审核' : '检查邻帧候选'}
       </button>}
       {hasComparisonTrial && !phaseDecisionReady && <button
@@ -3346,7 +3351,7 @@ export function EditorPrototypePage() {
   const [assetSearchQuery, setAssetSearchQuery] = useState('')
   const [gapAssetSelection, setGapAssetSelection] = useState(false)
   const [boundaryAssetReplacementTargetId, setBoundaryAssetReplacementTargetId] = useState<string | null>(null)
-  const [notice, setNotice] = useState('剪辑调整会自动保存为项目草稿；生成可导出版本时才冻结新时间线。')
+  const [notice, setNotice] = useState(DEFAULT_EDITOR_NOTICE)
   const [history, setHistory] = useState<EditorHistorySnapshot[]>([])
   const [future, setFuture] = useState<EditorHistorySnapshot[]>([])
   const [timelineZoom, setTimelineZoom] = useState(82)
@@ -4670,10 +4675,16 @@ export function EditorPrototypePage() {
     },
   })
 
-  const discardDraft = () => {
+  const discardDraft = async () => {
     if (!sourceTimeline) return
+    try {
+      await api.discardEditorDraft(projectId)
+      queryClient.setQueryData(['editor-prototype-draft', projectId], null)
+    } catch {
+      setNotice('项目草稿丢弃失败，当前服务端草稿和页面内容均保持不变；请重试。')
+      return
+    }
     window.localStorage.removeItem(localDraftKey)
-    void api.discardEditorDraft(projectId)
     setItems(sourceTimeline.items)
     setTimelineZoom(sourceTimeline.track_config.pixels_per_second)
     setSnapEnabled(sourceTimeline.track_config.snap_enabled)
@@ -7373,6 +7384,23 @@ export function EditorPrototypePage() {
     setValidationOpen(false)
   }
 
+  const hasStatusFailure = Boolean(
+    autoSaveDraft.error
+    || saveAndValidate.error
+    || renderPreview.error
+    || reviewPreview.error
+    || confirmTimeline.error
+    || authorizeDelivery.error
+    || uploadDelivery.error
+    || verifyDelivery.error,
+  )
+  const showStatusbar = notice !== DEFAULT_EDITOR_NOTICE || autoSaveDraft.isPending || hasStatusFailure
+  const hasSavedProjectDraft = Boolean(
+    serverDraft.data
+    && serverDraft.data.base_timeline_id === sourceTimeline?.id
+    && serverDraft.data.base_timeline_row_version === sourceTimeline?.row_version,
+  )
+
   if (projects.isPending || workspace.isPending) return <main className={styles.loading}><Film /><strong>正在装载剪辑台…</strong></main>
   if (!projectId) return <main className={styles.loading}><AlertTriangle /><strong>当前没有可进入剪辑台的项目</strong></main>
   if (!workspace.data || workspace.error) return <main className={styles.loading}><AlertTriangle /><strong>无法读取当前剪辑项目</strong></main>
@@ -7383,7 +7411,7 @@ export function EditorPrototypePage() {
     <Link className="primaryButton" to={`/editor/setup?project=${projectId}`}>前往时间线准备</Link>
   </main>
 
-  return <main className={styles.prototype}>
+  return <main className={styles.prototype} data-statusbar={showStatusbar}>
     <header className={styles.topbar}>
       <Link to="/" title="返回项目列表"><ArrowLeft /></Link>
       <div className={styles.projectTitle}>
@@ -7402,11 +7430,11 @@ export function EditorPrototypePage() {
       >
         {editorProjects.map(project => <option key={project.id} value={project.id}>{project.title}</option>)}
       </select>
-      <button className={styles.versionButton} onClick={() => setVersionOpen(true)}>时间线 v{sourceTimeline?.version_number ?? '--'} <small>{autoSaveDraft.isPending ? '正在自动保存…' : autoSaveDraft.error ? '云端保存失败' : dirty ? '项目草稿已自动保存' : '已同步'} · 查看版本证据</small></button>
+      <button className={styles.versionButton} onClick={() => setVersionOpen(true)}>时间线 v{sourceTimeline?.version_number ?? '--'} <small>{autoSaveDraft.isPending ? '正在自动保存…' : autoSaveDraft.error ? '云端保存失败' : dirty || hasSavedProjectDraft ? '项目草稿已自动保存' : '已同步'} · 查看版本证据</small></button>
       <div className={styles.topActions}>
         <button title="撤销" disabled={!history.length} onClick={undo}><Undo2 /></button>
         <button title="重做" disabled={!future.length} onClick={redo}><Redo2 /></button>
-        {dirty && <button title="丢弃自动保存的项目草稿" onClick={discardDraft}><RotateCcw /></button>}
+        {(dirty || hasSavedProjectDraft) && <button title="丢弃自动保存的项目草稿" onClick={() => void discardDraft()}><RotateCcw /></button>}
         <button className={styles.primaryAction} disabled={saveAndValidate.isPending} onClick={() => {
           if (firstShotOrderIssueBoundaryIndex >= 0) focusShotOrderIssueAt(firstShotOrderIssueBoundaryIndex)
           else if (unresolvedCount > 0) focusFirstUnresolvedGap()
@@ -7430,8 +7458,8 @@ export function EditorPrototypePage() {
       </div>
     </header>
 
-    <section className={styles.statusbar} data-warning={continuityReviewIssueCount > 0 || unresolvedCount > 0 || currentValidationErrors.length > 0 || Boolean(autoSaveDraft.error) || Boolean(saveAndValidate.error) || Boolean(renderPreview.error) || Boolean(reviewPreview.error) || Boolean(confirmTimeline.error) || Boolean(authorizeDelivery.error) || Boolean(uploadDelivery.error) || Boolean(verifyDelivery.error)}>
-      {autoSaveDraft.isPending ? <Cloud /> : autoSaveDraft.error ? <CloudOff /> : continuityReviewIssueCount > 0 || unresolvedCount || currentValidationErrors.length || saveAndValidate.error || renderPreview.error || reviewPreview.error || confirmTimeline.error || authorizeDelivery.error || uploadDelivery.error || verifyDelivery.error ? <AlertTriangle /> : <CheckCircle2 />}
+    {showStatusbar && <section className={styles.statusbar} data-warning={hasStatusFailure}>
+      {autoSaveDraft.isPending ? <Cloud /> : autoSaveDraft.error ? <CloudOff /> : hasStatusFailure ? <AlertTriangle /> : <CheckCircle2 />}
       <span>{notice}</span>
       {autoSaveDraft.error && <button disabled={autoSaveDraft.isPending} onClick={() => {
         setLastAutoSaveAttemptFingerprint(autoSaveFingerprint)
@@ -7445,7 +7473,7 @@ export function EditorPrototypePage() {
       {uploadDelivery.error && <button onClick={() => setDeliveryStatusOpen(true)}>{uploadDelivery.error instanceof Error ? uploadDelivery.error.message : '交付文件上传失败'}</button>}
       {verifyDelivery.error && <button onClick={() => setDeliveryStatusOpen(true)}>{verifyDelivery.error instanceof Error ? verifyDelivery.error.message : '交付文件验证失败'}</button>}
       <code>{lastAutoSavedAt ? `自动保存 ${new Date(lastAutoSavedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} · ` : ''}{workspace.data.aspect_ratio} · {outputFps}fps · {seconds(durationMs)}</code>
-    </section>
+    </section>}
 
     <section className={styles.editingArea}>
       <aside className={styles.assetPanel} data-gap-selection={gapAssetSelection} data-boundary-replacement={Boolean(boundaryAssetReplacementTarget)} data-search={assetSearchOpen}>
@@ -7832,10 +7860,7 @@ export function EditorPrototypePage() {
                   : '停止连续巡检'}（${boundaryReviewSession.position + 1}/${boundaryReviewSession.boundaryIndexes.length}）`
                 : `连续巡检 ${reviewableBoundaryIndexes.length} 个可播放切点${mainBoundaries.length > reviewableBoundaryIndexes.length ? ` · 跳过 ${mainBoundaries.length - reviewableBoundaryIndexes.length} 个缺口` : ''}`}</button>
             <div className={styles.boundaryList}>
-              {([
-                previousMainItem ? [previousMainItem, selectedItem] : null,
-                nextMainItem ? [selectedItem, nextMainItem] : null,
-              ] as Array<[TimelineItem, TimelineItem] | null>).filter((boundary): boundary is [TimelineItem, TimelineItem] => Boolean(boundary)).map(([left, right]) => {
+              {(activeBoundary ? [[activeBoundary.left, activeBoundary.right]] : []).map(([left, right]) => {
                 const transitionOut = left.transform.transition_out as { type?: string; duration_ms?: number } | undefined
                 const transitionIn = right.transform.transition_in as { type?: string; duration_ms?: number } | undefined
                 const pairedFade = transitionOut?.type === 'fade'
@@ -8485,6 +8510,15 @@ export function EditorPrototypePage() {
                            title={`打开当前切点的${observationActionLabel}；观察完成前不能标为通过。`}
                            onClick={() => {
                              const target = focusBoundaryForReviewAt(boundaryIndex, observationMode)
+                             if (target && observationMode === 'action') {
+                               setBoundaryCandidateGuidanceRequest(current => ({
+                                 boundaryKey: target.key,
+                                 checkId: check.id,
+                                 checkLabel: check.label,
+                                 requestToken: (current?.requestToken ?? 0) + 1,
+                                 intent: 'issue',
+                               }))
+                             }
                              if (target) setNotice(`正在观察“${check.label}”：完成${continuityReviewModeLabel(observationMode)}后才可标为通过。`)
                            }}
                          >观察：{observationActionLabel}</button>}
@@ -8719,11 +8753,12 @@ export function EditorPrototypePage() {
           disabled={!selectedItem || (selectedItem.track_type === 'main_video' && videoTrackLocked)}
           onClick={deleteSelected}
         ><Trash2 />删除所选</button>
-        <button disabled={renderPreview.isPending} onClick={() => {
+        {!primaryEditorTaskLabel && !dirty && <button disabled={renderPreview.isPending} onClick={() => {
           if (dirty) setNotice('请先生成一个可导出版本，再生成低清预览。')
           else renderPreview.mutate()
         }}><Film />{renderPreview.isPending ? '预览生成中…' : '低清预览'}</button>
-        {(deliveryWorkspace.data?.confirmed_timeline || deliveryAttempt) && <button onClick={() => setDeliveryStatusOpen(true)}>
+        }
+        {!primaryEditorTaskLabel && !dirty && (deliveryWorkspace.data?.confirmed_timeline || deliveryAttempt) && <button onClick={() => setDeliveryStatusOpen(true)}>
           {deliveryAttempt?.status === 'queued' || deliveryAttempt?.status === 'rendering' ? <RefreshCw /> : deliveryAttempt?.status === 'verified' ? <CheckCircle2 /> : <ShieldCheck />}
           {deliveryAttempt?.status === 'verified' ? '成片交付' : deliveryAttempt ? '交付状态' : '授权交付'}
         </button>}
@@ -8739,17 +8774,15 @@ export function EditorPrototypePage() {
         <button title="时间线适应窗口（\\）" onClick={fitTimelineToViewport}><Maximize2 />适应</button>
         <code>{timecode(playheadMs, outputFps)}</code>
       </header>
-      {shotOrderIssues.length > 0 && <div className={styles.shotOrderWarning}>
+      {shotOrderIssues.length > 1 && <div className={styles.shotOrderWarning}>
         <AlertTriangle />
         <span>
           <strong>发现 {shotOrderIssues.length} 处分镜顺序倒退</strong>
-          <small>当前：{currentShotOrderText || '未识别'} · 正式：{formalShotOrderText || '暂无正式分镜顺序'}{shotOrderIssues.length === 1 ? ' · 在右侧局部修复' : ' · 可一次整理全部已识别分镜'}</small>
+          <small>当前：{currentShotOrderText || '未识别'} · 正式：{formalShotOrderText || '暂无正式分镜顺序'} · 可一次整理全部已识别分镜</small>
         </span>
-        {shotOrderIssues.length === 1
-          ? <button onClick={() => focusShotOrderIssueAt(firstShotOrderIssueBoundaryIndex)}>定位这处倒序</button>
-          : <button disabled={videoTrackLocked} onClick={organizeMainTrackByShotOrder}>
-            {videoTrackLocked ? '解锁后整理全部' : '整理全部倒序镜头'}
-          </button>}
+        <button disabled={videoTrackLocked} onClick={organizeMainTrackByShotOrder}>
+          {videoTrackLocked ? '解锁后整理全部' : '整理全部倒序镜头'}
+        </button>
       </div>}
       <div className={styles.timelineViewport} ref={timelineViewportRef}>
         <div className={styles.timelineCanvas} style={{ width: `${84 + timelineWidth}px` }} onClick={event => {

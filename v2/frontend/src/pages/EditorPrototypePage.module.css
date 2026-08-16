@@ -15,6 +15,7 @@
   background: var(--editor-bg);
   color: var(--editor-text);
 }
+.prototype[data-statusbar="false"] { grid-template-rows: 64px minmax(300px, 1fr) 306px; }
 .loading {
   height: 100vh;
   display: grid;
@@ -1178,9 +1179,11 @@
   background: #17231e;
 }
 .boundaryPrimaryTask > span { min-width: 0; display: grid; gap: 2px; }
+.boundaryPrimaryTaskActions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
 .boundaryPrimaryTask strong { color: #e1ebe6; line-height: 1.35; }
 .boundaryPrimaryTask small { color: #91a198; line-height: 1.35; overflow-wrap: anywhere; }
-.boundaryControl .boundaryPrimaryTask > button { width: 100%; min-width: 0; height: 30px; border-color: #628b77; background: #29483a; color: #edf8f2; }
+.boundaryControl .boundaryPrimaryTask > button,
+.boundaryControl .boundaryPrimaryTaskActions > button { width: 100%; min-width: 0; height: 30px; border-color: #628b77; background: #29483a; color: #edf8f2; }
 .boundaryDisclosureButton {
   width: 100%;
   min-width: 0;

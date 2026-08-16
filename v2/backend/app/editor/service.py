@@ -80,17 +80,17 @@ _CONTINUITY_CHECKS = {
         ("eyeline", "构图、视线与主体位置没有异常跳变"),
     ],
     "time_jump": [
-        ("jump-readable", "时间跳转在画面或叙事中足够清楚"),
+        ("jump-readable", "1×观看后时间跳转清楚、切点节奏自然"),
         ("subject", "跳转前后主体身份仍可辨认"),
         ("new-information", "后镜提供了符合跳转意图的新信息"),
     ],
     "location_change": [
-        ("location-readable", "新地点在切点后能够被清楚识别"),
+        ("location-readable", "1×观看后地点切换清楚、切点节奏自然"),
         ("subject", "跨地点的主体与叙事承接一致"),
         ("orientation", "空间方向变化不会造成误读"),
     ],
     "outfit_change": [
-        ("outfit-readable", "服装变化明确且不是生成漂移"),
+        ("outfit-readable", "1×观看后换装意图清楚、切点节奏自然"),
         ("reason", "换装与时间、地点或剧情变化一致"),
         ("subject", "人物身份和其他稳定特征保持一致"),
     ],
@@ -103,7 +103,7 @@ _GENERAL_CONTINUITY_CHECKS = [
 
 
 def _continuity_review_mode(check_id: str) -> str:
-    if check_id == "motion":
+    if check_id in {"motion", "jump-readable", "location-readable", "outfit-readable"}:
         return "action"
     if check_id in {"eyeline", "orientation"}:
         return "overlay"

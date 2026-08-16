@@ -446,3 +446,10 @@ render 对每个 context 独立读取当前 outcome，派生 handling/recheck �
 - `validation_report` 的前端适用性由规范化 Timeline item 合同指纹决定，字段与草稿 fingerprint 的条目部分共用 `editorTimelineItemContracts`。当前条目指纹与已发布基线不同则旧报告只保留在版本证据中，不进入当前状态条、主任务或问题弹窗；重新生成版本后以后端新报告替换。
 - 连续复检队列是页面级导航状态 `continuityQueueActive`，不进入草稿、API、迁移或撤销历史。最终一项通过时用当前 `boundaryContinuityReviewProgress` 排除本边界并按 index 向后、再回绕选择下一未完成边界；下一工具模式仍按需调整 → 待复检原模式 → 普通 frames 的既有规则确定。任一 Timeline commit、结构预览重置、undo/redo 或显式返回会关闭队列，避免在合同变化后继续使用旧索引。
 - `continuityQueueActive` 同时驱动既有全时间线进度卡的标题、剩余数、说明和唯一按钮双态；停止分支只写页面状态与 notice，不触发 `setDirty`、媒体、outcome、observation、history 或 API。按钮仅在非运行且没有未完成边界时禁用。
+- 默认简洁态只改变前端投影，不新增持久状态。`showStatusbar` 由非默认 notice、自动保存进行中或真实 mutation failure 派生；稳定同步说明由顶部版本入口承担。单处 `shotOrderIssues` 不再挂载全宽告警，多处才保留全局整理事务。低清预览入口只在 `primaryEditorTaskLabel == null && dirty == false` 时挂载，后端预览、确认与交付合同不变。
+- 变化型正式边界复用既有检查 ID，不扩展 JSON map 或 schema：`jump-readable / location-readable / outfit-readable` 的 observation mode 从 `frames` 提升为 `action`。前后端共用的 action 门禁仍要求 `completed_steps == [synchronous_action, sequential_cut_realtime_context]`、`playback_rate == 1`、左右上下文覆盖各自最多 1000ms 且边界 fingerprint 精确匹配。旧 Timeline 不改写；开发草稿结果按当前必检语义重新完成，不增加运行时旧版兼容分支。
+- `boundaryList` 只挂载 `activeBoundary` 的一对 `left/right`；既有 `mainBoundaries`、进度计算、上一处/下一处导航、连续队列与冻结服务仍覆盖全部边界。切换边界会重新派生当前工具，不删除其他边界 outcome/observation/candidate session，也不新增页面模式、草稿字段或迁移。
+- `BoundaryActionComparison` 收到 `guidedIssueLabel` 时，一级任务卡直接复用既有 `startComparison / startSequencePreview`，展示同步播放与 1× 顺序试播；未收到引导时仍以邻帧候选作为诊断入口。两个按钮只改变现有媒体会话和 ready evidence，候选/A-B/试调合同不变，最终 outcome 仍需用户在连续性清单中明确选择。
+- action 类型检查的“观察”入口在定位当前边界后显式写入页面级 `boundaryCandidateGuidanceRequest`，包括当前 check ID/label 与递增 token；这让普通未检查项和待调整恢复项都进入同一直接观看任务。请求不进入草稿，刷新后仍由用户再次点击当前检查的观察入口建立。
+- `hasSavedProjectDraft` 由远端 draft 的 `base_timeline_id + base_timeline_row_version` 与当前源 Timeline 精确匹配派生；它与 `dirty` 共同驱动顶部草稿状态和丢弃入口。远端恢复仍保持 `dirty=false` 与零 autosave，但不再把“没有新编辑”误投影为“没有草稿”。
+- `discardDraft` 先等待服务端 DELETE 成功并把 `['editor-prototype-draft', projectId]` 查询缓存原子设为 `null`，再清 localStorage 与页面状态；失败时三者均保持，不能先恢复基线却留下权威远端草稿，也不能用过期查询继续显示草稿入口。

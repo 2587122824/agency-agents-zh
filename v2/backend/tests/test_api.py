@@ -6585,6 +6585,19 @@ def timeline_items_for_assets(video_assets: list[dict]) -> list[dict]:
     return items
 
 
+def test_change_continuity_relations_reuse_core_check_for_realtime_rhythm_observation() -> None:
+    expected = {
+        "time_jump": ("jump-readable", "1×观看后时间跳转清楚、切点节奏自然"),
+        "location_change": ("location-readable", "1×观看后地点切换清楚、切点节奏自然"),
+        "outfit_change": ("outfit-readable", "1×观看后换装意图清楚、切点节奏自然"),
+    }
+    for relation, (check_id, label) in expected.items():
+        checks = dict(editor_service._CONTINUITY_CHECKS[relation])
+        assert len(checks) == 3
+        assert checks[check_id] == label
+        assert editor_service._continuity_review_mode(check_id) == "action"
+
+
 def save_fully_reviewed_editor_draft(
     client: TestClient,
     project: dict,
