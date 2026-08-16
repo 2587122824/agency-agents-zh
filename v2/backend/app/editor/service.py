@@ -103,8 +103,10 @@ _GENERAL_CONTINUITY_CHECKS = [
 
 
 def _continuity_review_mode(check_id: str) -> str:
-    if check_id in {"motion", "jump-readable", "location-readable", "outfit-readable"}:
+    if check_id == "motion":
         return "action"
+    if check_id in {"jump-readable", "location-readable", "outfit-readable"}:
+        return "sequence"
     if check_id in {"eyeline", "orientation"}:
         return "overlay"
     return "frames"
@@ -217,7 +219,7 @@ def save_editor_draft(session: Session, project: Project, payload: SaveEditorDra
         )
         repository.add(draft)
     else:
-        draft.schema_version = "editor-draft-session.v9"
+        draft.schema_version = "editor-draft-session.v10"
         draft.snapshot_id = snapshot.id
         draft.base_timeline_id = timeline.id
         draft.base_timeline_row_version = timeline.row_version
@@ -499,6 +501,7 @@ def _freeze_continuity_review(
         "frames": ["left_frame", "right_frame"],
         "overlay": ["overlay"],
         "action": ["synchronous_action", "sequential_cut_realtime_context"],
+        "sequence": ["sequential_cut_realtime_context"],
     }
     boundaries = []
     unresolved = []
@@ -533,8 +536,8 @@ def _freeze_continuity_review(
             required_right_context_ms = min(1000, right_source_duration_ms)
             action_sequence_evidence = observation.get("action_sequence_evidence") if isinstance(observation, dict) else None
             action_sequence_matches = bool(
-                observation_mode != "action" and action_sequence_evidence is None
-                or observation_mode == "action"
+                observation_mode not in {"action", "sequence"} and action_sequence_evidence is None
+                or observation_mode in {"action", "sequence"}
                 and isinstance(action_sequence_evidence, dict)
                 and action_sequence_evidence.get("playback_rate") == 1
                 and required_left_context_ms <= action_sequence_evidence.get("left_context_ms", 0) <= left_source_duration_ms
@@ -585,7 +588,7 @@ def _freeze_continuity_review(
             f"仍有 {len(unresolved)} 项镜头连续性检查未通过，不能生成可导出版本。",
         )
     return {
-        "schema_version": "timeline-continuity-review.v6",
+        "schema_version": "timeline-continuity-review.v7",
         "editor_draft_row_version": draft.row_version,
         "editor_draft_updated_at": draft.updated_at.isoformat(),
         "boundary_count": len(boundaries),

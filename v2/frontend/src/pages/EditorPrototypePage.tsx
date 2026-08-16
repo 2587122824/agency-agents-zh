@@ -18,7 +18,7 @@ import { api } from '../api/client'
 import type { DeliveryAttempt, DeliveryWorkspace, EditorActionSequenceEvidence, EditorBoundaryCandidateReviewSession, EditorContinuityObservation, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from '../api/types'
 import styles from './EditorPrototypePage.module.css'
 
-const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v12'
+const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v13'
 
 interface LocalEditorDraft {
   schema_version: typeof LOCAL_DRAFT_SCHEMA
@@ -429,7 +429,7 @@ function analyzeFrameMotion(firstVideo: HTMLVideoElement, secondVideo: HTMLVideo
 }
 
 type ContinuityRelation = 'same_moment' | 'time_jump' | 'location_change' | 'outfit_change'
-type BoundaryContinuityReviewMode = 'frames' | 'overlay' | 'action'
+type BoundaryContinuityReviewMode = 'frames' | 'overlay' | 'action' | 'sequence'
 const DEFAULT_EDITOR_NOTICE = '当前时间线已同步；开始调整后会自动保存到项目。'
 
 const CONTINUITY_RELATION_COPY: Record<ContinuityRelation, { label: string; tone: 'locked' | 'change'; summary: string }> = {
@@ -469,12 +469,14 @@ const GENERAL_CONTINUITY_CHECKS = [
 ]
 
 function continuityReviewModeForCheckId(checkId: string): BoundaryContinuityReviewMode {
-  if (checkId === 'motion' || checkId === 'jump-readable' || checkId === 'location-readable' || checkId === 'outfit-readable') return 'action'
+  if (checkId === 'motion') return 'action'
+  if (checkId === 'jump-readable' || checkId === 'location-readable' || checkId === 'outfit-readable') return 'sequence'
   if (checkId === 'eyeline' || checkId === 'orientation') return 'overlay'
   return 'frames'
 }
 
 function continuityReviewModeLabel(mode: BoundaryContinuityReviewMode) {
+  if (mode === 'sequence') return '1× 完整上下文切点'
   if (mode === 'action') return '同步动作与 1× 完整上下文切点'
   if (mode === 'overlay') return '叠加对齐'
   return '并排复核'
@@ -1596,7 +1598,7 @@ function BoundaryActionComparison({
   onApplyPhasePair: (leftDeltaMs: number, rightDeltaMs: number) => void
   candidateReviewSessionKey: string
   candidateReviewSession: BoundaryCandidateReviewSession
-  guidedScanRequest: { requestToken: number; issueLabel: string; intent: 'issue' | 'resume' } | null
+  guidedScanRequest: { requestToken: number; issueLabel: string; intent: 'observe' | 'issue' | 'resume'; reviewMode: BoundaryContinuityReviewMode } | null
   onConsumeGuidedScanRequest: (requestToken: number) => void
   onRememberCandidateMotionEvidence: (sessionKey: string, sourceKey: string, analysis: BoundaryMotionAnalysis) => void
   onRememberCandidateComparisonOutcome: (sessionKey: string, sourceKey: string, outcome: BoundaryCandidateComparisonOutcome) => void
@@ -1647,6 +1649,7 @@ function BoundaryActionComparison({
   const [phaseCandidateScanSide, setPhaseCandidateScanSide] = useState<'left' | 'right' | null>(null)
   const [phaseCandidateScanExpanded, setPhaseCandidateScanExpanded] = useState(false)
   const [guidedIssueLabel, setGuidedIssueLabel] = useState<string | null>(null)
+  const [guidedReviewMode, setGuidedReviewMode] = useState<BoundaryContinuityReviewMode | null>(null)
   const [alternativeReviewTrialKey, setAlternativeReviewTrialKey] = useState<string | null>(null)
   const [pendingPhaseCandidateCompare, setPendingPhaseCandidateCompare] = useState<{ side: 'left' | 'right'; deltaMs: number } | null>(null)
   const [evidenceDetailsOpen, setEvidenceDetailsOpen] = useState(false)
@@ -2039,6 +2042,15 @@ function BoundaryActionComparison({
 
   useEffect(() => {
     if (!guidedScanRequest) return
+    if (guidedScanRequest.intent === 'observe') {
+      setGuidedIssueLabel(guidedScanRequest.issueLabel)
+      setGuidedReviewMode(guidedScanRequest.reviewMode)
+      setCandidateDetailsOpen(false)
+      setPhaseCandidateScanSide(null)
+      setPhaseCandidateScanExpanded(false)
+      onConsumeGuidedScanRequest(guidedScanRequest.requestToken)
+      return
+    }
     setCandidateDetailsOpen(true)
     if (guidedScanRequest.intent === 'resume') {
       const resumableCandidate = (side: 'left' | 'right') => legalPhaseCandidatesForSide(side, allPhaseCandidateFrameOffsets)
@@ -2076,6 +2088,7 @@ function BoundaryActionComparison({
       && leftDefaultPhaseCandidates.length > 0
       && leftPendingDefaultPhaseCandidateCount === 0
     setGuidedIssueLabel(guidedScanRequest.issueLabel)
+    setGuidedReviewMode(guidedScanRequest.reviewMode)
     setPhaseCandidateScanSide(preferredSide)
     setPhaseCandidateScanExpanded(false)
     onNotice(preferredSide
@@ -2582,13 +2595,13 @@ function BoundaryActionComparison({
     </header>
     <section className={styles.boundaryPrimaryTask} aria-label="当前同步动作任务">
       <span>
-        <strong>{phaseDecisionReady ? '对照已完成，请选择结果' : hasComparisonTrial ? 'B 已准备，下一步完成 A→B 对照' : guidedIssueLabel ? `完成两次观看：${guidedIssueLabel}` : '先检查最接近切点的邻帧'}</strong>
+        <strong>{phaseDecisionReady ? '对照已完成，请选择结果' : hasComparisonTrial ? 'B 已准备，下一步完成 A→B 对照' : guidedIssueLabel ? `${guidedReviewMode === 'sequence' ? '完成顺序观看' : '完成两次观看'}：${guidedIssueLabel}` : '先检查最接近切点的邻帧'}</strong>
         <small>{phaseCandidateScanSide
           ? `${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}已对照 ${reviewedPhaseCandidateCount}/${nearbyPhaseCandidates.length}${undecidedPhaseCandidateCount ? ` · 待决定 ${undecidedPhaseCandidateCount}` : ''}`
-          : hasComparisonTrial ? tunedTrialSummary : guidedIssueLabel ? '先并排看动作阶段，再按真实顺序看完整切点；两次都只记录观看证据，不修改时间线。' : '只在你打开后加载候选；系统不排序、不推荐，也不会自动设置 B。'}</small>
+          : hasComparisonTrial ? tunedTrialSummary : guidedIssueLabel ? (guidedReviewMode === 'sequence' ? '按真实顺序以 1× 看完切点两侧上下文；只记录观看证据，不修改时间线。' : '先并排看动作阶段，再按真实顺序看完整切点；两次都只记录观看证据，不修改时间线。') : '只在你打开后加载候选；系统不排序、不推荐，也不会自动设置 B。'}</small>
       </span>
       {guidedIssueLabel && !hasComparisonTrial && !phaseDecisionReady && <div className={styles.boundaryPrimaryTaskActions}>
-        <button type="button" disabled={comparisonDurationMs <= 0} onClick={playing ? pauseMedia : startComparison}>{playing ? '暂停同步播放' : progressMs > 0 ? '重播同步动作' : '同步播放动作'}</button>
+        {guidedReviewMode !== 'sequence' && <button type="button" disabled={comparisonDurationMs <= 0} onClick={playing ? pauseMedia : startComparison}>{playing ? '暂停同步播放' : progressMs > 0 ? '重播同步动作' : '同步播放动作'}</button>}
         <button type="button" disabled={sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady} onClick={sequencePlaying && phaseSequenceCompareStage === 'idle' ? pauseSequenceMedia : startSequencePreview}>{sequencePlaying && phaseSequenceCompareStage === 'idle' ? '暂停顺序试播' : sequenceProgressMs > 0 ? '重播顺序切点' : '顺序试播切点'}</button>
       </div>}
       {!guidedIssueLabel && !hasComparisonTrial && !phaseDecisionReady && <button type="button" onClick={() => setCandidateDetailsOpen(value => !value)}>
@@ -3243,7 +3256,8 @@ export function EditorPrototypePage() {
     checkId: string
     checkLabel: string
     requestToken: number
-    intent: 'issue' | 'resume'
+    intent: 'observe' | 'issue' | 'resume'
+    reviewMode: BoundaryContinuityReviewMode
   } | null>(null)
   const [boundaryCandidateReviewSessions, setBoundaryCandidateReviewSessions] = useState<Record<string, BoundaryCandidateReviewSession>>({})
   const candidateReviewSessionsLoadedRef = useRef(false)
@@ -4814,7 +4828,7 @@ export function EditorPrototypePage() {
     setBoundaryFrameComparisonKey(target.key)
     setBoundaryFrameOverlayKey(mode === 'overlay' ? target.key : null)
     setBoundaryFrameStripKey(null)
-    setBoundaryActionComparisonKey(mode === 'action' ? target.key : null)
+    setBoundaryActionComparisonKey(mode === 'action' || mode === 'sequence' ? target.key : null)
     setBoundaryCandidateGuidanceRequest(null)
     setBoundaryInspectorOpen(true)
     return target
@@ -4829,6 +4843,7 @@ export function EditorPrototypePage() {
       checkLabel: '候选审核待办',
       requestToken: Date.now(),
       intent: 'resume',
+      reviewMode: 'action',
     })
     setNotice(`正在定位候选审核待办：${target.left.label} → ${target.right.label}。`)
   }
@@ -4853,13 +4868,14 @@ export function EditorPrototypePage() {
         ...current,
         [target.key]: mergeBoundaryContinuityIssueContexts(current[target.key] ?? [], additions),
       }))
-      if (mode === 'action') {
+      if (mode === 'action' || mode === 'sequence') {
         setBoundaryCandidateGuidanceRequest(current => ({
           boundaryKey: target.key,
           checkId: firstAdjustment.id,
           checkLabel: firstAdjustment.label,
           requestToken: (current?.requestToken ?? 0) + 1,
           intent: 'issue',
+          reviewMode: mode,
         }))
       }
     }
@@ -4888,13 +4904,14 @@ export function EditorPrototypePage() {
       ...current,
       [target.key]: mergeBoundaryContinuityIssueContexts(current[target.key] ?? [], additions),
     }))
-    if (mode === 'action' && boundaryContinuityOutcomes[target.key]?.[checkId] === 'needs_adjustment') {
+    if ((mode === 'action' || mode === 'sequence') && boundaryContinuityOutcomes[target.key]?.[checkId] === 'needs_adjustment') {
       setBoundaryCandidateGuidanceRequest(current => ({
         boundaryKey: target.key,
         checkId,
         checkLabel,
         requestToken: (current?.requestToken ?? 0) + 1,
         intent: 'issue',
+        reviewMode: mode,
       }))
     }
     setNotice(`正在处理“${checkLabel}”：${target.left.label} → ${target.right.label}；已打开${continuityReviewModeLabel(mode)}，不会自动修改切点。`)
@@ -8157,6 +8174,7 @@ export function EditorPrototypePage() {
                             checkLabel: '候选审核待办',
                             requestToken: Date.now(),
                             intent: 'resume',
+                            reviewMode: 'action',
                           })
                         }}
                       >继续审核</button>
@@ -8221,6 +8239,7 @@ export function EditorPrototypePage() {
                                 checkLabel: '候选审核待办',
                                 requestToken: Date.now(),
                                 intent: 'resume',
+                                reviewMode: 'action',
                               })
                             }}
                           >继续审核</button>}
@@ -8303,6 +8322,7 @@ export function EditorPrototypePage() {
                              requestToken: boundaryCandidateGuidanceRequest.requestToken,
                              issueLabel: boundaryCandidateGuidanceRequest.checkLabel,
                              intent: boundaryCandidateGuidanceRequest.intent,
+                             reviewMode: boundaryCandidateGuidanceRequest.reviewMode,
                            }
                            : null}
                          onConsumeGuidedScanRequest={requestToken => setBoundaryCandidateGuidanceRequest(current => (
@@ -8376,7 +8396,7 @@ export function EditorPrototypePage() {
                        const requiredLeftContextMs = Math.min(1000, Math.max(0, (left.source_out_ms ?? 0) - (left.source_in_ms ?? 0)))
                        const requiredRightContextMs = Math.min(1000, Math.max(0, (right.source_out_ms ?? 0) - (right.source_in_ms ?? 0)))
                        const persistedActionSequenceEvidence = currentObservation?.action_sequence_evidence
-                       const persistedActionSequenceCurrent = observationMode !== 'action'
+                       const persistedActionSequenceCurrent = observationMode !== 'action' && observationMode !== 'sequence'
                          ? persistedActionSequenceEvidence == null
                          : persistedActionSequenceEvidence?.playback_rate === 1
                            && persistedActionSequenceEvidence.left_context_ms >= requiredLeftContextMs
@@ -8387,7 +8407,9 @@ export function EditorPrototypePage() {
                          ? ['left_frame', 'right_frame'] as const
                          : observationMode === 'overlay'
                            ? ['overlay'] as const
-                           : ['synchronous_action', 'sequential_cut_realtime_context'] as const
+                           : observationMode === 'sequence'
+                             ? ['sequential_cut_realtime_context'] as const
+                             : ['synchronous_action', 'sequential_cut_realtime_context'] as const
                        const persistedObservationCurrent = currentObservation?.boundary_fingerprint === boundaryFingerprint
                          && currentObservation.completed_steps.length === requiredCompletedSteps.length
                          && currentObservation.completed_steps.every((step, index) => step === requiredCompletedSteps[index])
@@ -8399,7 +8421,9 @@ export function EditorPrototypePage() {
                          ? Boolean(readyEvidence['frames-left'] && readyEvidence['frames-right'])
                          : observationMode === 'overlay'
                            ? Boolean(readyEvidence.overlay)
-                           : Boolean(actionSynchronousReady && actionSequenceReady)
+                           : observationMode === 'sequence'
+                             ? actionSequenceReady
+                             : Boolean(actionSynchronousReady && actionSequenceReady)
                        const canPass = persistedObservationCurrent || observationReady
                        const observationActionLabel = observationMode !== 'action'
                          ? continuityReviewModeLabel(observationMode)
@@ -8423,7 +8447,7 @@ export function EditorPrototypePage() {
                                  boundary_fingerprint: boundaryFingerprint,
                                  observed_at: new Date().toISOString(),
                                  completed_steps: [...requiredCompletedSteps],
-                                 action_sequence_evidence: observationMode === 'action'
+                                 action_sequence_evidence: observationMode === 'action' || observationMode === 'sequence'
                                    ? readyEvidence['action-sequence-realtime-context'] ?? null
                                    : null,
                                },
@@ -8510,13 +8534,14 @@ export function EditorPrototypePage() {
                            title={`打开当前切点的${observationActionLabel}；观察完成前不能标为通过。`}
                            onClick={() => {
                              const target = focusBoundaryForReviewAt(boundaryIndex, observationMode)
-                             if (target && observationMode === 'action') {
+                             if (target && (observationMode === 'action' || observationMode === 'sequence')) {
                                setBoundaryCandidateGuidanceRequest(current => ({
                                  boundaryKey: target.key,
                                  checkId: check.id,
                                  checkLabel: check.label,
                                  requestToken: (current?.requestToken ?? 0) + 1,
-                                 intent: 'issue',
+                                 intent: 'observe',
+                                 reviewMode: observationMode,
                                }))
                              }
                              if (target) setNotice(`正在观察“${check.label}”：完成${continuityReviewModeLabel(observationMode)}后才可标为通过。`)

@@ -6595,7 +6595,7 @@ def test_change_continuity_relations_reuse_core_check_for_realtime_rhythm_observ
         checks = dict(editor_service._CONTINUITY_CHECKS[relation])
         assert len(checks) == 3
         assert checks[check_id] == label
-        assert editor_service._continuity_review_mode(check_id) == "action"
+        assert editor_service._continuity_review_mode(check_id) == "sequence"
 
 
 def save_fully_reviewed_editor_draft(
@@ -6656,14 +6656,15 @@ def save_fully_reviewed_editor_draft(
                     "frames": ["left_frame", "right_frame"],
                     "overlay": ["overlay"],
                     "action": ["synchronous_action", "sequential_cut_realtime_context"],
+                    "sequence": ["sequential_cut_realtime_context"],
                 }[mode],
                 "action_sequence_evidence": {
                     "playback_rate": 1,
                     "left_context_ms": min(1000, left["source_out_ms"] - left["source_in_ms"]),
                     "right_context_ms": min(1000, right["source_out_ms"] - right["source_in_ms"]),
-                } if mode == "action" else None,
+                } if mode in {"action", "sequence"} else None,
             }
-            for mode in ("frames", "overlay", "action")
+            for mode in ("frames", "overlay", "action", "sequence")
         }
         for left, right in zip(main_items, main_items[1:])
         if left.get("asset_id") and right.get("asset_id")
@@ -8089,7 +8090,7 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
         },
     )
     assert saved_draft.status_code == 200
-    assert saved_draft.json()["schema_version"] == "editor-draft-session.v9"
+    assert saved_draft.json()["schema_version"] == "editor-draft-session.v10"
     assert saved_draft.json()["playhead_ms"] == 12_000
     assert saved_draft.json()["continuity_outcomes"] == {
         first_boundary_key: {"motion": "needs_adjustment", "subject": "passed"},
@@ -8370,7 +8371,7 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
     assert revised.status_code == 201
     assert revised.json()["status"] == "candidate"
     assert revised.json()["supersedes_timeline_id"] == exported["id"]
-    assert revised.json()["continuity_review"]["schema_version"] == "timeline-continuity-review.v6"
+    assert revised.json()["continuity_review"]["schema_version"] == "timeline-continuity-review.v7"
     assert revised.json()["continuity_review"]["boundary_count"] == 2
     assert revised.json()["continuity_review_hash"]
     assert revised.json()["continuity_review_hash"] == hashlib.sha256(
@@ -8388,7 +8389,7 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
     )
     assert all(
         check["action_sequence_evidence"] is not None
-        if check["observation_mode"] == "action"
+        if check["observation_mode"] in {"action", "sequence"}
         else check["action_sequence_evidence"] is None
         for boundary in revised.json()["continuity_review"]["boundaries"]
         for check in boundary["checks"]
@@ -8403,6 +8404,7 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
             "frames": ["left_frame", "right_frame"],
             "overlay": ["overlay"],
             "action": ["synchronous_action", "sequential_cut_realtime_context"],
+            "sequence": ["sequential_cut_realtime_context"],
         }[check["observation_mode"]]
         for boundary in revised.json()["continuity_review"]["boundaries"]
         for check in boundary["checks"]

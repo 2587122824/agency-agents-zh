@@ -1282,7 +1282,7 @@ export interface Timeline {
   track_config: TimelineTrackConfig
   validation_report: Array<{ code: string; path: string; message: string; evidence: Record<string, unknown> }>
   continuity_review: {
-    schema_version?: 'timeline-continuity-review.v6'
+    schema_version?: 'timeline-continuity-review.v7'
     editor_draft_row_version?: number
     editor_draft_updated_at?: string
     boundary_count?: number
@@ -1391,7 +1391,7 @@ export type EditorContinuityOutcome = 'passed' | 'needs_adjustment'
 export interface EditorContinuityIssueContext {
   check_id: string
   check_label: string
-  mode: 'frames' | 'overlay' | 'action'
+  mode: 'frames' | 'overlay' | 'action' | 'sequence'
 }
 
 export interface EditorContinuityObservation {
@@ -1463,7 +1463,7 @@ export type EditorContinuityObservationStep =
   | 'sequential_cut_realtime_context'
 
 export interface EditorDraft {
-  schema_version: 'editor-draft-session.v9'
+  schema_version: 'editor-draft-session.v10'
   project_id: string
   snapshot_id: string
   base_timeline_id: string
@@ -1473,7 +1473,7 @@ export interface EditorDraft {
   playhead_ms: number
   continuity_outcomes: Record<string, Record<string, EditorContinuityOutcome>>
   continuity_issue_contexts: Record<string, EditorContinuityIssueContext[]>
-  continuity_observations: Record<string, Partial<Record<'frames' | 'overlay' | 'action', EditorContinuityObservation>>>
+  continuity_observations: Record<string, Partial<Record<'frames' | 'overlay' | 'action' | 'sequence', EditorContinuityObservation>>>
   candidate_review_sessions: Record<string, EditorBoundaryCandidateReviewSession>
   row_version: number
   updated_by: string

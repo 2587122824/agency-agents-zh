@@ -718,9 +718,9 @@ Alembic 修订：`20260716_09`。
 - 发布证据：`8cd83439 / 864d37e5` 已推送 `main`，两轮后端均为 306 passed，最终 Vite bundle `index-DOgr2ofo.js / index-BvVK_GIz.css`。咖啡 v12 真实 UI 证明顶部结构优先、零写入定位、完整修复后准确变为“复检 3 个切点”、旧 validation 退场且复检入口进入 `SH-001 → SH-002` 而非旧问题弹窗；基线清理、1280×720 布局和零控制台错误均通过。最终 API `55820` / Worker `38164`，health、Alembic `20260813_51` 与四日志正常。
 - 发布证据：`201e612d / 670e5363` 已推送 `main`；两轮完整后端均为 306 passed，最终 Vite bundle `index-j7aIia_t.js / index-BvVK_GIz.css`。咖啡 v12 真实 UI 已证明零写入导航、折叠替代路径、锁轨门禁、4 段完整修复、3 个切点自动试听、单步 undo/redo 与基线清理；1280×720 无横向溢出且控制台零 warning/error。最终服务 API `41156` / Worker `58336`，health 与 Alembic `20260813_51` 正常，四份标准日志零实际错误。
 - 首屏减法实现于 `EditorPrototypePage.tsx`：默认 notice 提升为单一常量，稳定态不挂载 statusbar；单处倒序依赖顶部当前任务、片段警示和右侧修复区，不再挂载重复全宽文案；多处倒序仍保留一次整理；低清预览仅在无当前任务且草稿已冻结时出现。能力与命令未删除，稳定首屏减少一行状态、一张告警和一个当前不可执行按钮。
-- 衔接质量门禁不增加清单数量：三类允许变化关系继续各 3 项，把原 `jump-readable / location-readable / outfit-readable` 的文案合并节奏判断并映射到既有 action 观察。后端冻结仍消费同一 `timeline-continuity-review.v6` 结构和 action evidence；新增自动化同时断言检查数量保持 3、合并文案和 action 映射。
+- 衔接质量门禁不增加清单数量：三类允许变化关系继续各 3 项，`jump-readable / location-readable / outfit-readable` 映射到新增 `sequence` 观察，只需一次 1× 完整上下文顺序切点；`same_moment.motion` 保持 action 的同步动作与顺序切点两步。冻结升级为 `timeline-continuity-review.v7`，草稿升级为 `editor-draft-session.v10 / editor-local-draft.v13`。
 - 衔接 Inspector 不再从选中片段同时映射前后两套 `boundaryControl`；`boundaryList` 只渲染现有 `activeBoundary`。原 1/N 导航和连续队列承担切换，全部边界继续参与任务进度和后端冻结，减少的是同屏工具副本而不是审核范围。
-- action 检查的观察入口现在把“同步播放动作 / 顺序试播切点”放在 `boundaryPrimaryTask` 一级；候选扫描只在非引导诊断态保留一级入口。播放仍复用既有完成回调分别登记 `action-synchronous / action-sequence-realtime-context`，不自动修改 outcome。
+- 观察与修复引导拆分：普通观察以 `observe` 进入，不展开候选或自动选择扫描侧；`sequence` 一级只显示“顺序试播切点”，`action` 一级显示“同步播放动作 / 顺序试播切点”。只有“需调整”使用 `issue` 展开候选修复，续办使用 `resume`。播放仍复用既有完成回调登记证据，不自动修改 outcome。
 - 普通未检查 action 项点击“观察”时同步建立瞬时 guidance request；此前只有待调整/候选续办会设置该请求，导致新节奏门禁打开动作区后仍把邻帧候选误当主任务。该修复只改变页面引导投影。
 - Browser 清理验收发现远端草稿恢复后 `dirty=false` 会隐藏唯一丢弃入口并把版本误标为“已同步”。新增当前基线精确匹配的 `hasSavedProjectDraft` 投影；恢复保持零写入，但草稿事实与恢复入口持续可见。
 - 暴露入口后继续发现旧 `discardDraft` 以 fire-and-forget DELETE 恢复页面且不清 React Query，导致服务端失败时页面可能假装已丢弃、成功后缓存仍显示草稿。现改为等待 DELETE、成功原子清查询缓存后再重置本地，失败零清理并明确提示。

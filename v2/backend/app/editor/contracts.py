@@ -64,7 +64,7 @@ class EditorContinuityIssueContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
     check_id: str = Field(min_length=1, max_length=80)
     check_label: str = Field(min_length=1, max_length=240)
-    mode: Literal["frames", "overlay", "action"]
+    mode: Literal["frames", "overlay", "action", "sequence"]
 
 
 class EditorActionSequenceEvidence(BaseModel):
@@ -196,7 +196,7 @@ class SaveEditorDraft(BaseModel):
     continuity_issue_contexts: dict[str, list[EditorContinuityIssueContext]] = Field(max_length=500)
     continuity_observations: dict[
         str,
-        dict[Literal["frames", "overlay", "action"], EditorContinuityObservation],
+        dict[Literal["frames", "overlay", "action", "sequence"], EditorContinuityObservation],
     ] = Field(max_length=500)
     candidate_review_sessions: dict[str, EditorBoundaryCandidateReviewSession] = Field(max_length=500)
 
@@ -206,7 +206,7 @@ class SaveEditorDraft(BaseModel):
 
 
 class EditorDraftRead(BaseModel):
-    schema_version: Literal["editor-draft-session.v9"] = "editor-draft-session.v9"
+    schema_version: Literal["editor-draft-session.v10"] = "editor-draft-session.v10"
     project_id: str
     snapshot_id: str
     base_timeline_id: str
@@ -218,7 +218,7 @@ class EditorDraftRead(BaseModel):
     continuity_issue_contexts: dict[str, list[EditorContinuityIssueContext]]
     continuity_observations: dict[
         str,
-        dict[Literal["frames", "overlay", "action"], EditorContinuityObservation],
+        dict[Literal["frames", "overlay", "action", "sequence"], EditorContinuityObservation],
     ]
     candidate_review_sessions: dict[str, EditorBoundaryCandidateReviewSession]
     row_version: int
