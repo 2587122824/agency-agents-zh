@@ -7770,23 +7770,32 @@ export function EditorPrototypePage() {
               aria-label="全时间线人工连续性检查进度"
             >
               <span>
-                <strong>人工连续性 {passedBoundaryContinuityReviewCount}/{boundaryContinuityReviewProgress.length} 个切点通过</strong>
-                <small>{nextUnresolvedBoundaryContinuityReview
+                <strong>{continuityQueueActive ? '连续复检中' : '人工连续性'} {passedBoundaryContinuityReviewCount}/{boundaryContinuityReviewProgress.length} 个切点通过</strong>
+                <small>{continuityQueueActive
+                  ? `当前切点全部通过后自动定位下一处 · 剩余 ${unresolvedBoundaryContinuityReviews.length} 个切点`
+                  : nextUnresolvedBoundaryContinuityReview
                   ? `未检查 ${unreviewedBoundaryContinuityCheckCount} · 待调整 ${needsAdjustmentBoundaryContinuityCheckCount} · 待复检 ${recheckBoundaryContinuityCheckCount} · 按时间线顺序循环`
                   : '当前所有可播放切点均已逐项通过'}</small>
               </span>
               <button
                 type="button"
-                disabled={!nextUnresolvedBoundaryContinuityReview}
-                title={nextUnresolvedBoundaryContinuityReview
-                  ? '定位后优先打开待调整或待复检原问题的观察工具；普通未检查项使用并排。不会改变播放头或写入草稿。'
-                  : '当前所有可播放切点的人工连续性检查均已通过。'}
+                disabled={!continuityQueueActive && !nextUnresolvedBoundaryContinuityReview}
+                title={continuityQueueActive
+                  ? '停止完成当前切点后自动定位下一处；当前观察工具与已保存结果保持不变。'
+                  : nextUnresolvedBoundaryContinuityReview
+                    ? '定位后优先打开待调整或待复检原问题的观察工具；普通未检查项使用并排。不会改变播放头或写入草稿。'
+                    : '当前所有可播放切点的人工连续性检查均已通过。'}
                 onClick={() => {
+                  if (continuityQueueActive) {
+                    setContinuityQueueActive(false)
+                    setNotice('已结束连续复检；当前切点、观察工具和已有人工结果保持不变。')
+                    return
+                  }
                   if (!nextUnresolvedBoundaryContinuityReview) return
                   setContinuityQueueActive(true)
                   focusIncompleteBoundaryContinuityReviewAt(nextUnresolvedBoundaryContinuityReview.index)
                 }}
-              >{nextUnresolvedBoundaryContinuityReview ? '下一个待处理' : '已全部通过'}</button>
+              >{continuityQueueActive ? '结束连续复检' : nextUnresolvedBoundaryContinuityReview ? '下一个待处理' : '已全部通过'}</button>
             </div>}
             {candidateReviewFollowUpBoundaries.length > 0 && nextCandidateReviewFollowUpBoundary && <div
               className={styles.boundaryCandidateReviewQueue}

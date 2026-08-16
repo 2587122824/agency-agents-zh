@@ -445,3 +445,4 @@ render 对每个 context 独立读取当前 outcome，派生 handling/recheck �
 - 顶部主任务是按阶段计算的只读投影，不再使用 `structural issue + continuity check` 的原子项求和。路由优先级固定为正式分镜倒序 → 显式画面缺口 → 其他验证问题 → 未完成连续性切点；完整修复新增多个边界后，主操作按边界数显示复检任务，不能因每边界内部检查数量而制造任务膨胀。
 - `validation_report` 的前端适用性由规范化 Timeline item 合同指纹决定，字段与草稿 fingerprint 的条目部分共用 `editorTimelineItemContracts`。当前条目指纹与已发布基线不同则旧报告只保留在版本证据中，不进入当前状态条、主任务或问题弹窗；重新生成版本后以后端新报告替换。
 - 连续复检队列是页面级导航状态 `continuityQueueActive`，不进入草稿、API、迁移或撤销历史。最终一项通过时用当前 `boundaryContinuityReviewProgress` 排除本边界并按 index 向后、再回绕选择下一未完成边界；下一工具模式仍按需调整 → 待复检原模式 → 普通 frames 的既有规则确定。任一 Timeline commit、结构预览重置、undo/redo 或显式返回会关闭队列，避免在合同变化后继续使用旧索引。
+- `continuityQueueActive` 同时驱动既有全时间线进度卡的标题、剩余数、说明和唯一按钮双态；停止分支只写页面状态与 notice，不触发 `setDirty`、媒体、outcome、observation、history 或 API。按钮仅在非运行且没有未完成边界时禁用。
