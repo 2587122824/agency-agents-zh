@@ -3201,6 +3201,7 @@ export function EditorPrototypePage() {
   const [boundaryFocusKey, setBoundaryFocusKey] = useState<string | null>(null)
   const [boundaryInspectorOpen, setBoundaryInspectorOpen] = useState(false)
   const boundaryInspectorEntryRef = useRef<HTMLElement | null>(null)
+  const inspectorRef = useRef<HTMLElement | null>(null)
   const [boundaryReviewSession, setBoundaryReviewSession] = useState<{
     boundaryIndexes: number[]
     position: number
@@ -3757,6 +3758,10 @@ export function EditorPrototypePage() {
   const activeBoundaryOrderWarning = activeBoundaryLeftSequence != null
     && activeBoundaryRightSequence != null
     && activeBoundaryLeftSequence > activeBoundaryRightSequence
+  const activeBoundaryFollowingItem = activeBoundaryIndex >= 0 ? mainItems[activeBoundaryIndex + 2] ?? null : null
+  const activeBoundaryFollowingGap = activeBoundaryFollowingItem?.track_type === 'main_video' && !activeBoundaryFollowingItem.asset_id
+    ? activeBoundaryFollowingItem
+    : null
   const reviewableBoundaryIndexes = useMemo(
     () => mainBoundaries.flatMap((boundary, index) => boundary.left.asset_id && boundary.right.asset_id ? [index] : []),
     [mainBoundaries],
@@ -3963,6 +3968,105 @@ export function EditorPrototypePage() {
       trimmedDurationMs: (fillerCandidates[0].duration_ms ?? 0) - selectedGapCombinedRepair.remainingGapMs,
     }
   }, [selectedGapCombinedRepair, usedMainVideoAssetIds, workspace.data?.available_assets, workspace.data?.shot_sequence])
+  const activeBoundaryCompleteRepair = useMemo(() => {
+    if (!activeBoundaryOrderWarning || !activeBoundaryFollowingGap || !activeBoundary?.right.asset_id) return null
+    const precedingItem = activeBoundary.right
+    if (
+      precedingItem.source_out_ms == null
+      || precedingItem.asset_duration_ms == null
+      || precedingItem.timeline_out_ms !== activeBoundaryFollowingGap.timeline_in_ms
+    ) return null
+    const gapDurationMs = activeBoundaryFollowingGap.timeline_out_ms - activeBoundaryFollowingGap.timeline_in_ms
+    const availableSourceTailMs = precedingItem.asset_duration_ms - precedingItem.source_out_ms
+    const rawExtensionMs = Math.min(gapDurationMs, availableSourceTailMs)
+    const rawRemainingGapMs = gapDurationMs - rawExtensionMs
+    const extensionMs = rawRemainingGapMs > 0 && rawRemainingGapMs < 200
+      ? Math.max(0, gapDurationMs - 200)
+      : rawExtensionMs
+    if (extensionMs <= 0) return null
+
+    const gapIndex = mainItems.findIndex(item => item.id === activeBoundaryFollowingGap.id)
+    let leftSequence: number | undefined
+    for (let index = gapIndex - 1; index >= 0; index -= 1) {
+      const item = mainItems[index]
+      const sequence = item.asset_id ? shotSequenceByAssetId.get(item.asset_id) : undefined
+      if (sequence != null) {
+        leftSequence = sequence
+        break
+      }
+    }
+    let rightSequence: number | undefined
+    for (let index = gapIndex + 1; index < mainItems.length; index += 1) {
+      const item = mainItems[index]
+      const sequence = item.asset_id ? shotSequenceByAssetId.get(item.asset_id) : undefined
+      if (sequence != null) {
+        rightSequence = sequence
+        break
+      }
+    }
+    const usedShotCodes = new Set(mainItems.flatMap(item => item.asset_id && shotCodeByAssetId.get(item.asset_id)
+      ? [shotCodeByAssetId.get(item.asset_id)!]
+      : []))
+    const formalRecommendation = (workspace.data?.shot_sequence ?? [])
+      .filter(shot => !usedShotCodes.has(shot.shot_code))
+      .filter(shot => leftSequence == null || shot.sequence_number > leftSequence)
+      .filter(shot => rightSequence == null || shot.sequence_number < rightSequence)
+      .map(shot => ({
+        shot,
+        assets: (workspace.data?.available_assets ?? [])
+          .filter(asset => (
+            asset.asset_type === 'video'
+            && asset.duration_ms != null
+            && asset.duration_ms > 0
+            && asset.shot_code === shot.shot_code
+            && !usedMainVideoAssetIds.has(asset.id)
+          ))
+          .sort((left, right) => left.id.localeCompare(right.id)),
+      }))
+      .filter(recommendation => recommendation.assets.length > 0)
+      .sort((left, right) => left.shot.sequence_number - right.shot.sequence_number)[0]
+    if (!formalRecommendation || formalRecommendation.assets.length !== 1) return null
+    const formalAsset = formalRecommendation.assets[0]
+    const gapAfterExtensionMs = gapDurationMs - extensionMs
+    const formalInsertedDurationMs = Math.min(formalAsset.duration_ms ?? 0, gapAfterExtensionMs)
+    if (formalInsertedDurationMs < 200) return null
+    const remainingGapMs = gapAfterExtensionMs - formalInsertedDurationMs
+    if (remainingGapMs < 200) return null
+
+    const formalShotCodes = new Set((workspace.data?.shot_sequence ?? []).map(shot => shot.shot_code))
+    const fillerCandidates = (workspace.data?.available_assets ?? [])
+      .filter(asset => (
+        asset.asset_type === 'video'
+        && asset.duration_ms != null
+        && asset.duration_ms >= remainingGapMs
+        && asset.id !== formalAsset.id
+        && !usedMainVideoAssetIds.has(asset.id)
+        && (!asset.shot_code || !formalShotCodes.has(asset.shot_code))
+      ))
+      .sort((left, right) => left.id.localeCompare(right.id))
+    if (fillerCandidates.length !== 1) return null
+    return {
+      gap: activeBoundaryFollowingGap,
+      precedingItem,
+      extensionMs,
+      formalShotCode: formalRecommendation.shot.shot_code,
+      formalAsset,
+      formalInsertedDurationMs,
+      fillerAsset: fillerCandidates[0],
+      fillerInsertedDurationMs: remainingGapMs,
+      fillerTrimmedDurationMs: (fillerCandidates[0].duration_ms ?? 0) - remainingGapMs,
+    }
+  }, [
+    activeBoundary,
+    activeBoundaryFollowingGap,
+    activeBoundaryOrderWarning,
+    mainItems,
+    shotCodeByAssetId,
+    shotSequenceByAssetId,
+    usedMainVideoAssetIds,
+    workspace.data?.available_assets,
+    workspace.data?.shot_sequence,
+  ])
   const selectedGapDurationMs = selectedItem?.track_type === 'main_video' && !selectedItem.asset_id
     ? selectedItem.timeline_out_ms - selectedItem.timeline_in_ms
     : 0
@@ -7481,7 +7585,7 @@ export function EditorPrototypePage() {
         </div>
       </section>
 
-      <aside className={styles.inspector} data-mode={boundaryInspectorOpen ? 'boundary' : 'clip'}>
+      <aside ref={inspectorRef} className={styles.inspector} data-mode={boundaryInspectorOpen ? 'boundary' : 'clip'}>
         <header>
           <div className={styles.inspectorTitle}><span>INSPECTOR</span><strong>{boundaryInspectorOpen ? '衔接检查' : selectedItem?.asset_id ? '片段属性' : '缺口处理'}</strong></div>
           {boundaryInspectorOpen && <button className={styles.inspectorBack} onClick={() => {
@@ -7568,7 +7672,7 @@ export function EditorPrototypePage() {
           </section>}
           {selectedItem.track_type === 'main_video' && (previousMainItem || nextMainItem) && <section ref={boundaryInspectorEntryRef} className={styles.boundaryInspectorEntry} data-order-warning={activeBoundaryOrderWarning}>
             <div>
-              <span>{activeBoundaryOrderWarning ? '结构问题' : '镜头衔接'}</span>
+              <span>{activeBoundaryCompleteRepair ? '结构与时长问题' : activeBoundaryOrderWarning ? '结构问题' : '镜头衔接'}</span>
               <strong>{activeBoundaryOrderWarning && activeBoundary
                 ? `${activeBoundary.left.label} → ${activeBoundary.right.label} 顺序倒退`
                 : activeBoundaryContinuityReview
@@ -7576,11 +7680,24 @@ export function EditorPrototypePage() {
                     ? `${activeBoundaryContinuityReview.unresolvedCount} 项待检查`
                     : `${activeBoundaryContinuityReview.passedCount}/${activeBoundaryContinuityReview.requiredCount} 项已通过`
                   : '当前切点含画面缺口'}</strong>
-              <small>{activeBoundaryOrderWarning && activeBoundary
+              <small>{activeBoundaryCompleteRepair
+                ? `可延长 ${activeBoundaryCompleteRepair.precedingItem.label} ${seconds(activeBoundaryCompleteRepair.extensionMs)}、补入 ${activeBoundaryCompleteRepair.formalShotCode} ${seconds(activeBoundaryCompleteRepair.formalInsertedDurationMs)}，再用 ${activeBoundaryCompleteRepair.fillerAsset.node_key ?? activeBoundaryCompleteRepair.fillerAsset.role} 覆盖 ${seconds(activeBoundaryCompleteRepair.fillerInsertedDurationMs)}；补齐 ${seconds(durationMs)}。`
+                : activeBoundaryOrderWarning && activeBoundary
                 ? `正式顺序应为 ${activeBoundary.right.label} → ${activeBoundary.left.label}。先修复结构，再判断动作衔接。`
                 : '需要时再进入切点预览、连续性判断和修复工具。'}</small>
             </div>
-            {activeBoundaryOrderWarning && activeBoundary ? <>
+            {activeBoundaryCompleteRepair ? <>
+              <button onClick={() => {
+                setBoundaryInspectorOpen(false)
+                selectItem(activeBoundaryCompleteRepair.gap)
+                window.requestAnimationFrame(() => inspectorRef.current?.scrollTo({ top: 0, behavior: 'smooth' }))
+              }}>查看一次完整修复方案<ChevronRight /></button>
+              <button
+                className={styles.boundaryInspectorEntrySecondary}
+                disabled={videoTrackLocked}
+                onClick={() => activeBoundary && swapBoundaryToFormalOrder(activeBoundary.left, activeBoundary.right)}
+              >{videoTrackLocked ? '解锁后仅交换这两镜' : '仅交换这两镜'}</button>
+            </> : activeBoundaryOrderWarning && activeBoundary ? <>
               <button disabled={videoTrackLocked} onClick={() => swapBoundaryToFormalOrder(activeBoundary.left, activeBoundary.right)}>
                 {videoTrackLocked ? '解锁后交换这两镜' : '按正式顺序交换这两镜'}<ChevronRight />
               </button>
@@ -8471,6 +8588,9 @@ export function EditorPrototypePage() {
             <strong>{videoTrackLocked ? '解锁后一次完整修复' : '一次完整修复正式顺序与时长'}</strong>
             <small>延长 {selectedGapPrecedingExtension.item.label} {seconds(selectedGapPrecedingExtension.extensionMs)} + 补入 {selectedGapFormalRecommendation.shot.shot_code} {seconds(selectedGapCombinedRepair.insertedDurationMs)} + {selectedGapCompleteRepair.asset.node_key ?? selectedGapCompleteRepair.asset.role} 覆盖 {seconds(selectedGapCompleteRepair.insertedDurationMs)}{selectedGapCompleteRepair.trimmedDurationMs > 0 ? `（裁切 ${seconds(selectedGapCompleteRepair.trimmedDurationMs)}）` : ''}；补齐到 {seconds(durationMs)} 并试听全部新切点</small>
           </span></button>}
+          <details className={styles.gapAlternatives} open={!selectedGapCompleteRepair}>
+            <summary>{selectedGapCompleteRepair ? '其他处理方式' : '可用处理方式'}</summary>
+            <div>
           {selectedGapPrecedingExtension && selectedGapFormalRecommendation && selectedGapCombinedRepair && <button
             disabled={videoTrackLocked}
             onClick={() => applySelectedGapCombinedRepair()}
@@ -8507,6 +8627,8 @@ export function EditorPrototypePage() {
           <Link to={`/projects/${projectId}/decision-impact`}><Clock3 /><span><strong>分析缩短成片</strong><small>先评估修改 15 秒目标的下游影响</small></span></Link>
           <Link to={`/production?project=${projectId}`}><WandSparkles /><span><strong>前往生成补充镜头</strong><small>在生产流程登记新镜头，授权后才可能产生费用</small></span></Link>
           <button disabled={videoTrackLocked} onClick={() => startGapAssetSelection()}><Plus /><span><strong>{videoTrackLocked ? '先解锁画面轨' : '选择其他素材'}</strong><small>{videoTrackLocked ? '锁定期间不会替换缺口' : '只列出未用于主画面的已批准视频'}</small></span></button>
+            </div>
+          </details>
         </section>}
       </aside>
     </section>

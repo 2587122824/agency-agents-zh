@@ -2255,8 +2255,18 @@
 .gapTitle span { display: grid; gap: 4px; }
 .gapTitle strong { font-size: 11px; }
 .gapTitle small { color: #91999d; font-size: 8px; }
+.gapAlternatives { border-top: 1px solid #343b3e; }
+.gapAlternatives > summary {
+  padding: 8px 0 2px;
+  color: #aeb7b3;
+  font-size: 11px;
+  cursor: pointer;
+}
+.gapAlternatives > div { padding-top: 7px; display: grid; gap: 7px; }
 .gapActions > button,
-.gapActions > a {
+.gapActions > a,
+.gapAlternatives > div > button,
+.gapAlternatives > div > a {
   min-height: 55px;
   padding: 8px;
   display: grid;
@@ -2272,15 +2282,25 @@
   cursor: pointer;
 }
 .gapActions > button:hover,
-.gapActions > a:hover { border-color: #6a4a40; background: #2d2522; }
+.gapActions > a:hover,
+.gapAlternatives > div > button:hover,
+.gapAlternatives > div > a:hover { border-color: #6a4a40; background: #2d2522; }
 .gapActions > button > svg,
-.gapActions > a > svg { width: 16px; color: var(--editor-accent); }
+.gapActions > a > svg,
+.gapAlternatives > div > button > svg,
+.gapAlternatives > div > a > svg { width: 16px; color: var(--editor-accent); }
 .gapActions > button span,
-.gapActions > a span { display: grid; gap: 3px; }
+.gapActions > a span,
+.gapAlternatives > div > button span,
+.gapAlternatives > div > a span { display: grid; gap: 3px; }
 .gapActions > button strong,
-.gapActions > a strong { font-size: 9px; }
+.gapActions > a strong,
+.gapAlternatives > div > button strong,
+.gapAlternatives > div > a strong { font-size: 9px; }
 .gapActions > button small,
-.gapActions > a small { color: #8b9498; font-size: 8px; }
+.gapActions > a small,
+.gapAlternatives > div > button small,
+.gapAlternatives > div > a small { color: #8b9498; font-size: 8px; }
 .timelinePanel {
   min-width: 0;
   min-height: 0;
