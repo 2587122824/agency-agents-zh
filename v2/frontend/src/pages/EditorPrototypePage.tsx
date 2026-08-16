@@ -3199,6 +3199,7 @@ export function EditorPrototypePage() {
     playbackRate: number
   } | null>(null)
   const [boundaryFocusKey, setBoundaryFocusKey] = useState<string | null>(null)
+  const [boundaryInspectorOpen, setBoundaryInspectorOpen] = useState(false)
   const [boundaryReviewSession, setBoundaryReviewSession] = useState<{
     boundaryIndexes: number[]
     position: number
@@ -3797,6 +3798,9 @@ export function EditorPrototypePage() {
   const continuityReviewIssueCount = unreviewedBoundaryContinuityCheckCount
     + needsAdjustmentBoundaryContinuityCheckCount
     + recheckBoundaryContinuityCheckCount
+  const activeBoundaryContinuityReview = boundaryContinuityReviewProgress.find(
+    boundary => boundary.index === activeBoundaryIndex,
+  ) ?? null
   const nextUnresolvedBoundaryContinuityReview = unresolvedBoundaryContinuityReviews.find(
     boundary => boundary.index > activeBoundaryIndex,
   ) ?? unresolvedBoundaryContinuityReviews[0] ?? null
@@ -4640,6 +4644,7 @@ export function EditorPrototypePage() {
     setBoundaryFrameStripKey(null)
     setBoundaryActionComparisonKey(mode === 'action' ? target.key : null)
     setBoundaryCandidateGuidanceRequest(null)
+    setBoundaryInspectorOpen(true)
     return target
   }
 
@@ -7453,9 +7458,20 @@ export function EditorPrototypePage() {
         </div>
       </section>
 
-      <aside className={styles.inspector}>
-        <header><span>INSPECTOR</span><strong>{selectedItem?.asset_id ? '片段属性' : '缺口处理'}</strong></header>
+      <aside className={styles.inspector} data-mode={boundaryInspectorOpen ? 'boundary' : 'clip'}>
+        <header>
+          <div className={styles.inspectorTitle}><span>INSPECTOR</span><strong>{boundaryInspectorOpen ? '衔接检查' : selectedItem?.asset_id ? '片段属性' : '缺口处理'}</strong></div>
+          {boundaryInspectorOpen && <button className={styles.inspectorBack} onClick={() => {
+            setBoundaryInspectorOpen(false)
+            setBoundaryFrameComparisonKey(null)
+            setBoundaryFrameOverlayKey(null)
+            setBoundaryFrameStripKey(null)
+            setBoundaryActionComparisonKey(null)
+            setBoundaryCandidateGuidanceRequest(null)
+          }}><ChevronLeft />返回片段</button>}
+        </header>
         {selectedItem?.asset_id ? <>
+          {!boundaryInspectorOpen && <>
           <section className={styles.clipIdentity}><i>{selectedItem.track_type === 'main_video' ? <Film /> : selectedItem.track_type === 'audio' ? <Music2 /> : <Subtitles />}</i><div><strong>{selectedItem.label}</strong><span>{selectedItem.track_type === 'main_video' ? `对应分镜 ${selectedItem.label.split('.')[0]}` : selectedItem.track_type === 'audio' ? '真实音频素材' : '烧录字幕素材'}</span></div></section>
           <section>
             <h3>素材范围</h3>
@@ -7527,7 +7543,23 @@ export function EditorPrototypePage() {
             })()}
             {videoTrackLocked && <div className={styles.trimHint}>画面轨锁定期间只允许选择、寻帧和预览，不写入本地草稿。</div>}
           </section>}
-          {selectedItem.track_type === 'main_video' && (previousMainItem || nextMainItem) && <section>
+          {selectedItem.track_type === 'main_video' && (previousMainItem || nextMainItem) && <section className={styles.boundaryInspectorEntry}>
+            <div>
+              <span>镜头衔接</span>
+              <strong>{activeBoundaryContinuityReview
+                ? activeBoundaryContinuityReview.unresolvedCount > 0
+                  ? `${activeBoundaryContinuityReview.unresolvedCount} 项待检查`
+                  : `${activeBoundaryContinuityReview.passedCount}/${activeBoundaryContinuityReview.requiredCount} 项已通过`
+                : '当前切点含画面缺口'}</strong>
+              <small>需要时再进入切点预览、连续性判断和修复工具。</small>
+            </div>
+            <button onClick={() => {
+              setBoundaryInspectorOpen(true)
+              focusBoundaryAt(activeBoundaryIndex)
+            }}>检查当前切点<ChevronRight /></button>
+          </section>}
+          </>}
+          {boundaryInspectorOpen && selectedItem.track_type === 'main_video' && (previousMainItem || nextMainItem) && <section>
             <div className={styles.boundarySectionHeader}>
               <h3>镜头衔接</h3>
               <div aria-label="切点顺序导航">
