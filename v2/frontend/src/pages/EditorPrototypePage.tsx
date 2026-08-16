@@ -3204,6 +3204,7 @@ export function EditorPrototypePage() {
   } | null>(null)
   const [boundaryFocusKey, setBoundaryFocusKey] = useState<string | null>(null)
   const [boundaryInspectorOpen, setBoundaryInspectorOpen] = useState(false)
+  const [continuityQueueActive, setContinuityQueueActive] = useState(false)
   const boundaryInspectorEntryRef = useRef<HTMLElement | null>(null)
   const inspectorRef = useRef<HTMLElement | null>(null)
   const [boundaryReviewSession, setBoundaryReviewSession] = useState<{
@@ -3435,6 +3436,7 @@ export function EditorPrototypePage() {
     setBoundaryFrameOverlayKey(null)
     setBoundaryFrameStripKey(null)
     setBoundaryActionComparisonKey(null)
+    setContinuityQueueActive(false)
     setBoundaryCandidateGuidanceRequest(null)
     setBoundaryAssetReplacementTargetId(null)
     setPendingBoundaryPreviewKey(null)
@@ -4764,6 +4766,7 @@ export function EditorPrototypePage() {
 
   const focusShotOrderIssueAt = (targetIndex: number) => {
     if (targetIndex < 0) return
+    setContinuityQueueActive(false)
     setBoundaryInspectorOpen(false)
     focusBoundaryAt(targetIndex)
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
@@ -4774,6 +4777,7 @@ export function EditorPrototypePage() {
   const focusFirstUnresolvedGap = () => {
     const gap = mainItems.find(item => !item.asset_id)
     if (!gap) return
+    setContinuityQueueActive(false)
     setBoundaryInspectorOpen(false)
     selectItem(gap)
     setNotice(`已定位画面缺口：${seconds(gap.timeline_out_ms - gap.timeline_in_ms)}。请先完成结构与素材取舍，再复检新增切点。`)
@@ -5277,6 +5281,7 @@ export function EditorPrototypePage() {
     setBoundaryPreviewEndMs(null)
     setBoundaryPreviewLoop(null)
     setBoundaryReviewSession(null)
+    setContinuityQueueActive(false)
     setHistory(rows => [...rows.slice(-49), historySnapshot(items)])
     setFuture([])
     setItems(nextItems)
@@ -5299,6 +5304,7 @@ export function EditorPrototypePage() {
     setBoundaryCandidateGuidanceRequest(null)
     setBoundaryFocusKey(null)
     setBoundaryReviewSession(null)
+    setContinuityQueueActive(false)
     setPendingBoundaryPreviewKey(null)
     setBoundaryRollMonitor(null)
     setPendingBoundaryReview(null)
@@ -5315,6 +5321,7 @@ export function EditorPrototypePage() {
     setBoundaryPreviewEndMs(null)
     setBoundaryPreviewLoop(null)
     setBoundaryReviewSession(null)
+    setContinuityQueueActive(false)
     setPendingBoundaryPreviewKey(null)
     setPendingBoundaryReview(null)
     const previous = history[history.length - 1]
@@ -5348,6 +5355,7 @@ export function EditorPrototypePage() {
     setBoundaryPreviewEndMs(null)
     setBoundaryPreviewLoop(null)
     setBoundaryReviewSession(null)
+    setContinuityQueueActive(false)
     setPendingBoundaryPreviewKey(null)
     setPendingBoundaryReview(null)
     const next = future[0]
@@ -7403,7 +7411,10 @@ export function EditorPrototypePage() {
           if (firstShotOrderIssueBoundaryIndex >= 0) focusShotOrderIssueAt(firstShotOrderIssueBoundaryIndex)
           else if (unresolvedCount > 0) focusFirstUnresolvedGap()
           else if (currentValidationErrors.length > 0) setValidationOpen(true)
-          else if (nextUnresolvedBoundaryContinuityReview) focusIncompleteBoundaryContinuityReviewAt(nextUnresolvedBoundaryContinuityReview.index)
+          else if (nextUnresolvedBoundaryContinuityReview) {
+            setContinuityQueueActive(true)
+            focusIncompleteBoundaryContinuityReviewAt(nextUnresolvedBoundaryContinuityReview.index)
+          }
           else if (dirty) setConfirmSaveOpen(true)
           else setNotice('当前版本已经通过检查，可以进入确认阶段。')
         }}>
@@ -7615,6 +7626,7 @@ export function EditorPrototypePage() {
         <header>
           <div className={styles.inspectorTitle}><span>INSPECTOR</span><strong>{boundaryInspectorOpen ? '衔接检查' : selectedItem?.asset_id ? '片段属性' : '缺口处理'}</strong></div>
           {boundaryInspectorOpen && <button className={styles.inspectorBack} onClick={() => {
+            setContinuityQueueActive(false)
             setBoundaryInspectorOpen(false)
             setBoundaryFrameComparisonKey(null)
             setBoundaryFrameOverlayKey(null)
@@ -7769,8 +7781,11 @@ export function EditorPrototypePage() {
                 title={nextUnresolvedBoundaryContinuityReview
                   ? '定位后优先打开待调整或待复检原问题的观察工具；普通未检查项使用并排。不会改变播放头或写入草稿。'
                   : '当前所有可播放切点的人工连续性检查均已通过。'}
-                onClick={() => nextUnresolvedBoundaryContinuityReview
-                  && focusIncompleteBoundaryContinuityReviewAt(nextUnresolvedBoundaryContinuityReview.index)}
+                onClick={() => {
+                  if (!nextUnresolvedBoundaryContinuityReview) return
+                  setContinuityQueueActive(true)
+                  focusIncompleteBoundaryContinuityReviewAt(nextUnresolvedBoundaryContinuityReview.index)
+                }}
               >{nextUnresolvedBoundaryContinuityReview ? '下一个待处理' : '已全部通过'}</button>
             </div>}
             {candidateReviewFollowUpBoundaries.length > 0 && nextCandidateReviewFollowUpBoundary && <div
@@ -8401,6 +8416,37 @@ export function EditorPrototypePage() {
                            }
                            return { ...current, [boundaryKey]: nextBoundaryOutcomes }
                          })
+                         const completesCurrentBoundary = nextOutcome === 'passed'
+                           && status !== 'passed'
+                           && passedContinuityCheckCount + 1 === continuityChecks.length
+                         if (continuityQueueActive && completesCurrentBoundary) {
+                           const nextReview = boundaryContinuityReviewProgress.find(review => (
+                             review.index > boundaryIndex
+                             && review.index !== boundaryIndex
+                             && review.unresolvedCount > 0
+                           )) ?? boundaryContinuityReviewProgress.find(review => (
+                             review.index < boundaryIndex
+                             && review.unresolvedCount > 0
+                           )) ?? null
+                           if (!nextReview) {
+                             setContinuityQueueActive(false)
+                             setNotice(`当前 ${boundaryContinuityReviewProgress.length} 个可播放切点已全部明确通过。`)
+                           } else {
+                             const nextMode = nextReview.needsAdjustmentChecks[0]
+                               ? continuityReviewModeForCheckId(nextReview.needsAdjustmentChecks[0].id)
+                               : nextReview.recheckContexts[0]?.mode ?? 'frames'
+                             window.setTimeout(() => {
+                               const target = focusBoundaryForReviewAt(nextReview.index, nextMode)
+                               if (!target) {
+                                 setContinuityQueueActive(false)
+                                 setNotice('下一复检切点已发生变化，连续复检已安全停止。')
+                                 return
+                               }
+                               inspectorRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+                               setNotice(`本切点已全部通过，已继续到 ${target.left.label} → ${target.right.label}；不会自动播放或替你作出结论。`)
+                             }, 0)
+                           }
+                         }
                        }
                        return <div className={styles.continuityCheckRow} data-status={status} key={check.id}>
                          <div>
