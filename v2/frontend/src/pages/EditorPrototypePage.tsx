@@ -3847,6 +3847,10 @@ export function EditorPrototypePage() {
   const activeBoundaryContinuityReview = boundaryContinuityReviewProgress.find(
     boundary => boundary.index === activeBoundaryIndex,
   ) ?? null
+  const activeBoundaryRepairToolsVisible = activeBoundaryKey != null
+    && (boundaryContinuityIssueContexts[activeBoundaryKey] ?? []).some(context => (
+      boundaryContinuityOutcomes[activeBoundaryKey]?.[context.checkId] === 'needs_adjustment'
+    ))
   const nextUnresolvedBoundaryContinuityReview = unresolvedBoundaryContinuityReviews.find(
     boundary => boundary.index > activeBoundaryIndex,
   ) ?? unresolvedBoundaryContinuityReviews[0] ?? null
@@ -7856,7 +7860,7 @@ export function EditorPrototypePage() {
                 onClick={() => focusCandidateReviewFollowUpAt(nextCandidateReviewFollowUpBoundary.index)}
               >下一个待办</button>
             </div>}
-            <button
+            {(activeBoundaryRepairToolsVisible || boundaryReviewSession) && <button
               className={styles.boundaryReviewRun}
               aria-pressed={Boolean(boundaryReviewSession)}
               disabled={!reviewableBoundaryIndexes.length}
@@ -7875,7 +7879,7 @@ export function EditorPrototypePage() {
                   : boundaryReviewSession.scope === 'history'
                   ? '停止撤销/重做切点试听'
                   : '停止连续巡检'}（${boundaryReviewSession.position + 1}/${boundaryReviewSession.boundaryIndexes.length}）`
-                : `连续巡检 ${reviewableBoundaryIndexes.length} 个可播放切点${mainBoundaries.length > reviewableBoundaryIndexes.length ? ` · 跳过 ${mainBoundaries.length - reviewableBoundaryIndexes.length} 个缺口` : ''}`}</button>
+                : `连续巡检 ${reviewableBoundaryIndexes.length} 个可播放切点${mainBoundaries.length > reviewableBoundaryIndexes.length ? ` · 跳过 ${mainBoundaries.length - reviewableBoundaryIndexes.length} 个缺口` : ''}`}</button>}
             <div className={styles.boundaryList}>
               {(activeBoundary ? [[activeBoundary.left, activeBoundary.right]] : []).map(([left, right]) => {
                 const transitionOut = left.transform.transition_out as { type?: string; duration_ms?: number } | undefined
@@ -7947,6 +7951,7 @@ export function EditorPrototypePage() {
                   const hasCandidateReviewFollowUp = candidateReviewUndecidedCount > 0
                     || candidateReviewShortlistedCount > 0
                     || candidateReviewMeasuredOnlyCount > 0
+                  const repairToolsVisible = handlingContinuityIssueCount > 0 || hasCandidateReviewFollowUp
                  const leftSourceInMs = left.source_in_ms ?? 0
                  const leftSourceOutMs = left.source_out_ms ?? leftSourceInMs
                  const rightSourceInMs = right.source_in_ms ?? 0
@@ -8031,7 +8036,7 @@ export function EditorPrototypePage() {
                        : '当前两镜不是正式相邻分镜，不能套用原连续性关系，请按当前叙事人工判断。'}</span>
                      <em>{passedContinuityCheckCount}/{continuityChecks.length} 通过 · 待调整 {needsAdjustmentContinuityCheckCount}</em>
                    </div>}
-                   <div className={styles.boundaryActions}>
+                   {repairToolsVisible && <><div className={styles.boundaryActions}>
                     <button
                       disabled={!left.asset_id || !right.asset_id}
                       onClick={() => previewBoundary(left, right)}
@@ -8148,7 +8153,7 @@ export function EditorPrototypePage() {
                       setBoundaryFrameComparisonKey(value => value === boundaryKey ? null : boundaryKey)
                       if (framesOpen) setBoundaryActionComparisonKey(null)
                     }}
-                   ><Layers3 />{framesOpen ? '收起切点定格' : '对比末帧 / 首帧'}</button>
+                   ><Layers3 />{framesOpen ? '收起切点定格' : '对比末帧 / 首帧'}</button></>}
                     {!framesOpen && hasCandidateReviewFollowUp && <section
                       className={styles.boundaryCandidateReviewReminder}
                       aria-label={`${left.label} 到 ${right.label} 的候选审核待办`}
@@ -8180,7 +8185,7 @@ export function EditorPrototypePage() {
                       >继续审核</button>
                     </section>}
                     {framesOpen && left.asset_id && right.asset_id && <>
-                     <div className={styles.boundaryFrameModes}>
+                     {repairToolsVisible && <div className={styles.boundaryFrameModes}>
                        <div>
                          <button aria-pressed={!overlayFrames && !stripFrames && !actionComparison} onClick={() => {
                            setBoundaryFrameOverlayKey(null)
@@ -8244,7 +8249,7 @@ export function EditorPrototypePage() {
                             }}
                           >继续审核</button>}
                         </section>}
-                      </div>
+                      </div>}
                      {stripFrames
                        ? <div className={styles.boundaryFrameStrip} aria-label={`${left.label} 到 ${right.label} 的动作连续帧带`}>
                          {([
@@ -8515,16 +8520,13 @@ export function EditorPrototypePage() {
                            <em>{status === 'passed' ? '通过' : status === 'needs_adjustment' ? '需调整' : '未检查'}</em>
                          </div>
                          <div className={styles.continuityOutcomeButtons} role="group" aria-label={`${check.label}的检查结果`}>
-                           <button type="button" aria-pressed={!outcome} onClick={() => setOutcome(null)}>未检查</button>
-                           <button
+                           {outcome && <button type="button" onClick={() => setOutcome(null)}>重新判断</button>}
+                           {canPass && <button
                              type="button"
                              aria-pressed={status === 'passed'}
-                             disabled={!canPass}
-                             title={canPass
-                               ? `已完成当前切点的${continuityReviewModeLabel(observationMode)}。`
-                               : `先完成当前切点的${continuityReviewModeLabel(observationMode)}，才能标为通过。`}
+                             title={`已完成当前切点的${continuityReviewModeLabel(observationMode)}。`}
                              onClick={() => setOutcome('passed')}
-                           >通过</button>
+                           >通过</button>}
                            <button type="button" aria-pressed={status === 'needs_adjustment'} onClick={() => setOutcome('needs_adjustment')}>需调整</button>
                          </div>
                          {status !== 'passed' && !canPass && <button
@@ -8596,7 +8598,7 @@ export function EditorPrototypePage() {
             </div>
             <div className={styles.trimHint}>淡出淡入会同时设置前镜淡出和后镜淡入，并作为一个撤销步骤写入草稿；它不是交叉叠化。正式预览和导出使用同一冻结参数。</div>
           </section>}
-          {boundaryInspectorOpen && selectedItem.track_type === 'main_video' && <section>
+          {boundaryInspectorOpen && activeBoundaryRepairToolsVisible && selectedItem.track_type === 'main_video' && <section>
             <h3>转场</h3>
             {(['transition_in', 'transition_out'] as const).map(key => {
               const transition = selectedItem.transform[key] as { type?: 'cut' | 'fade'; duration_ms?: number } | undefined
