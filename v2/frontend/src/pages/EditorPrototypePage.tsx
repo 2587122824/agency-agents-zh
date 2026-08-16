@@ -3200,6 +3200,7 @@ export function EditorPrototypePage() {
   } | null>(null)
   const [boundaryFocusKey, setBoundaryFocusKey] = useState<string | null>(null)
   const [boundaryInspectorOpen, setBoundaryInspectorOpen] = useState(false)
+  const boundaryInspectorEntryRef = useRef<HTMLElement | null>(null)
   const [boundaryReviewSession, setBoundaryReviewSession] = useState<{
     boundaryIndexes: number[]
     position: number
@@ -3735,6 +3736,11 @@ export function EditorPrototypePage() {
     })),
     [mainItems],
   )
+  const shotOrderIssueBoundaryIndexes = shotOrderIssues.flatMap(issue => {
+    const index = mainBoundaries.findIndex(boundary => boundary.left.id === issue.left.id && boundary.right.id === issue.right.id)
+    return index >= 0 ? [index] : []
+  })
+  const firstShotOrderIssueBoundaryIndex = shotOrderIssueBoundaryIndexes[0] ?? -1
   const focusedBoundaryIndex = mainBoundaries.findIndex(boundary => boundary.key === boundaryFocusKey)
   const inferredBoundaryIndex = selectedMainPosition < 0 || !mainBoundaries.length
     ? -1
@@ -4633,6 +4639,15 @@ export function EditorPrototypePage() {
     setPlayheadMs(target.left.timeline_out_ms)
     setBoundaryFocusKey(target.key)
     setNotice(`已定位第 ${targetIndex + 1}/${mainBoundaries.length} 个切点：${target.left.label} → ${target.right.label}。`)
+  }
+
+  const focusShotOrderIssueAt = (targetIndex: number) => {
+    if (targetIndex < 0) return
+    setBoundaryInspectorOpen(false)
+    focusBoundaryAt(targetIndex)
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      boundaryInspectorEntryRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }))
   }
 
   const focusBoundaryForReviewAt = (targetIndex: number, mode: BoundaryContinuityReviewMode) => {
@@ -7551,7 +7566,7 @@ export function EditorPrototypePage() {
             })()}
             {videoTrackLocked && <div className={styles.trimHint}>画面轨锁定期间只允许选择、寻帧和预览，不写入本地草稿。</div>}
           </section>}
-          {selectedItem.track_type === 'main_video' && (previousMainItem || nextMainItem) && <section className={styles.boundaryInspectorEntry} data-order-warning={activeBoundaryOrderWarning}>
+          {selectedItem.track_type === 'main_video' && (previousMainItem || nextMainItem) && <section ref={boundaryInspectorEntryRef} className={styles.boundaryInspectorEntry} data-order-warning={activeBoundaryOrderWarning}>
             <div>
               <span>{activeBoundaryOrderWarning ? '结构问题' : '镜头衔接'}</span>
               <strong>{activeBoundaryOrderWarning && activeBoundary
@@ -8530,11 +8545,13 @@ export function EditorPrototypePage() {
         <AlertTriangle />
         <span>
           <strong>发现 {shotOrderIssues.length} 处分镜顺序倒退</strong>
-          <small>当前：{currentShotOrderText || '未识别'} · 正式：{formalShotOrderText || '暂无正式分镜顺序'}</small>
+          <small>当前：{currentShotOrderText || '未识别'} · 正式：{formalShotOrderText || '暂无正式分镜顺序'}{shotOrderIssues.length === 1 ? ' · 在右侧局部修复' : ' · 可一次整理全部已识别分镜'}</small>
         </span>
-        <button disabled={videoTrackLocked} onClick={organizeMainTrackByShotOrder}>
-          {videoTrackLocked ? '解锁后整理' : '按正式分镜整理'}
-        </button>
+        {shotOrderIssues.length === 1
+          ? <button onClick={() => focusShotOrderIssueAt(firstShotOrderIssueBoundaryIndex)}>定位这处倒序</button>
+          : <button disabled={videoTrackLocked} onClick={organizeMainTrackByShotOrder}>
+            {videoTrackLocked ? '解锁后整理全部' : '整理全部倒序镜头'}
+          </button>}
       </div>}
       <div className={styles.timelineViewport} ref={timelineViewportRef}>
         <div className={styles.timelineCanvas} style={{ width: `${84 + timelineWidth}px` }} onClick={event => {
