@@ -443,3 +443,4 @@ render 对每个 context 独立读取当前 outcome，派生 handling/recheck �
 - 局部正式顺序交换不保存额外状态。渲染时由当前相邻 `left/right` 的 `shotSequenceByAssetId` 同步派生入口；命令再次复验相邻性和 `leftSequence > rightSequence`，随后只交换这两个 `mainItems`，复用 `normalizeMainTrack`、`reconcileStructuralTransitions`、`resetStructuralPreviewState` 与 `commitItems`。新 `pendingBoundaryReview.scope='structure'` 仅控制自动试听文案与受影响新边界队列，不进入草稿或 Timeline；history 快照仍是唯一撤销事实。该能力不新增 API、迁移、后端字段或运行时兼容。
 - Inspector 的确定性修复投影遵循单主任务约束：完整修复可用时，倒序边界摘要只负责无写入地导航到 gap 事务，不暴露仅交换入口；完整事务不可投影时才回退到局部正式顺序交换。
 - 顶部主任务是按阶段计算的只读投影，不再使用 `structural issue + continuity check` 的原子项求和。路由优先级固定为正式分镜倒序 → 显式画面缺口 → 其他验证问题 → 未完成连续性切点；完整修复新增多个边界后，主操作按边界数显示复检任务，不能因每边界内部检查数量而制造任务膨胀。
+- `validation_report` 的前端适用性由规范化 Timeline item 合同指纹决定，字段与草稿 fingerprint 的条目部分共用 `editorTimelineItemContracts`。当前条目指纹与已发布基线不同则旧报告只保留在版本证据中，不进入当前状态条、主任务或问题弹窗；重新生成版本后以后端新报告替换。

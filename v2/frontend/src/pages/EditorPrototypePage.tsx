@@ -278,19 +278,7 @@ function editorDraftFingerprint(
 ) {
   return JSON.stringify(canonicalDraftValue({
     base: sourceTimeline ? [sourceTimeline.id, sourceTimeline.row_version] : null,
-    items: items.map(item => ({
-      id: item.id,
-      track_type: item.track_type,
-      sequence_number: item.sequence_number,
-      asset_id: item.asset_id,
-      label: item.label,
-      gap_reason: item.gap_reason,
-      source_in_ms: item.source_in_ms,
-      source_out_ms: item.source_out_ms,
-      timeline_in_ms: item.timeline_in_ms,
-      timeline_out_ms: item.timeline_out_ms,
-      transform: item.transform,
-    })),
+    items: editorTimelineItemContracts(items),
     playhead_ms: Math.max(0, Math.round(playheadMs)),
     snap_enabled: snapEnabled,
     pixels_per_second: timelineZoom,
@@ -298,6 +286,22 @@ function editorDraftFingerprint(
     boundary_continuity_issue_contexts: boundaryContinuityIssueContexts,
     boundary_continuity_observations: boundaryContinuityObservations,
     boundary_candidate_review_sessions: boundaryCandidateReviewSessions,
+  }))
+}
+
+function editorTimelineItemContracts(items: TimelineItem[]) {
+  return items.map(item => ({
+    id: item.id,
+    track_type: item.track_type,
+    sequence_number: item.sequence_number,
+    asset_id: item.asset_id,
+    label: item.label,
+    gap_reason: item.gap_reason,
+    source_in_ms: item.source_in_ms,
+    source_out_ms: item.source_out_ms,
+    timeline_in_ms: item.timeline_in_ms,
+    timeline_out_ms: item.timeline_out_ms,
+    transform: item.transform,
   }))
 }
 
@@ -4117,12 +4121,18 @@ export function EditorPrototypePage() {
   const validationErrors = lastValidation?.validation_report
     ?? sourceTimeline?.validation_report
     ?? []
+  const itemsDifferFromValidatedTimeline = useMemo(() => {
+    if (!sourceTimeline) return false
+    return JSON.stringify(canonicalDraftValue(editorTimelineItemContracts(items)))
+      !== JSON.stringify(canonicalDraftValue(editorTimelineItemContracts(sourceTimeline.items)))
+  }, [items, sourceTimeline])
+  const currentValidationErrors = itemsDifferFromValidatedTimeline ? [] : validationErrors
   const primaryEditorTaskLabel = shotOrderIssues.length > 0
     ? `修复 ${shotOrderIssues.length} 处镜头顺序`
     : unresolvedCount > 0
       ? `处理 ${unresolvedCount} 处画面缺口`
-      : validationErrors.length > 0
-        ? `处理 ${validationErrors.length} 项时间线问题`
+      : currentValidationErrors.length > 0
+        ? `处理 ${currentValidationErrors.length} 项时间线问题`
         : unresolvedBoundaryContinuityReviews.length > 0
           ? `复检 ${unresolvedBoundaryContinuityReviews.length} 个切点`
           : null
@@ -7392,7 +7402,7 @@ export function EditorPrototypePage() {
         <button className={styles.primaryAction} disabled={saveAndValidate.isPending} onClick={() => {
           if (firstShotOrderIssueBoundaryIndex >= 0) focusShotOrderIssueAt(firstShotOrderIssueBoundaryIndex)
           else if (unresolvedCount > 0) focusFirstUnresolvedGap()
-          else if (validationErrors.length > 0) setValidationOpen(true)
+          else if (currentValidationErrors.length > 0) setValidationOpen(true)
           else if (nextUnresolvedBoundaryContinuityReview) focusIncompleteBoundaryContinuityReviewAt(nextUnresolvedBoundaryContinuityReview.index)
           else if (dirty) setConfirmSaveOpen(true)
           else setNotice('当前版本已经通过检查，可以进入确认阶段。')
@@ -7409,8 +7419,8 @@ export function EditorPrototypePage() {
       </div>
     </header>
 
-    <section className={styles.statusbar} data-warning={continuityReviewIssueCount > 0 || unresolvedCount > 0 || validationErrors.length > 0 || Boolean(autoSaveDraft.error) || Boolean(saveAndValidate.error) || Boolean(renderPreview.error) || Boolean(reviewPreview.error) || Boolean(confirmTimeline.error) || Boolean(authorizeDelivery.error) || Boolean(uploadDelivery.error) || Boolean(verifyDelivery.error)}>
-      {autoSaveDraft.isPending ? <Cloud /> : autoSaveDraft.error ? <CloudOff /> : continuityReviewIssueCount > 0 || unresolvedCount || validationErrors.length || saveAndValidate.error || renderPreview.error || reviewPreview.error || confirmTimeline.error || authorizeDelivery.error || uploadDelivery.error || verifyDelivery.error ? <AlertTriangle /> : <CheckCircle2 />}
+    <section className={styles.statusbar} data-warning={continuityReviewIssueCount > 0 || unresolvedCount > 0 || currentValidationErrors.length > 0 || Boolean(autoSaveDraft.error) || Boolean(saveAndValidate.error) || Boolean(renderPreview.error) || Boolean(reviewPreview.error) || Boolean(confirmTimeline.error) || Boolean(authorizeDelivery.error) || Boolean(uploadDelivery.error) || Boolean(verifyDelivery.error)}>
+      {autoSaveDraft.isPending ? <Cloud /> : autoSaveDraft.error ? <CloudOff /> : continuityReviewIssueCount > 0 || unresolvedCount || currentValidationErrors.length || saveAndValidate.error || renderPreview.error || reviewPreview.error || confirmTimeline.error || authorizeDelivery.error || uploadDelivery.error || verifyDelivery.error ? <AlertTriangle /> : <CheckCircle2 />}
       <span>{notice}</span>
       {autoSaveDraft.error && <button disabled={autoSaveDraft.isPending} onClick={() => {
         setLastAutoSaveAttemptFingerprint(autoSaveFingerprint)
@@ -8909,7 +8919,7 @@ export function EditorPrototypePage() {
       <header><AlertTriangle /><div><span>VALIDATION ISSUES</span><h2>需要处理的时间线问题</h2></div><button title="关闭" onClick={() => setValidationOpen(false)}><X /></button></header>
       <p>点击问题会定位到对应片段。技术代码只用于审计，实际处理以中文说明为准。</p>
       <div className={styles.validationList}>
-        {(validationErrors.length ? validationErrors : mainItems.filter(item => !item.asset_id).map(item => ({
+        {(currentValidationErrors.length ? currentValidationErrors : mainItems.filter(item => !item.asset_id).map(item => ({
           code: 'TIMELINE_GAP_UNRESOLVED',
           path: `items.main_video.${item.sequence_number}`,
           message: '候选保留了显式空位，必须完成素材取舍后才能确认。',
