@@ -724,3 +724,4 @@ Alembic 修订：`20260716_09`。
 - 普通未检查 action 项点击“观察”时同步建立瞬时 guidance request；此前只有待调整/候选续办会设置该请求，导致新节奏门禁打开动作区后仍把邻帧候选误当主任务。该修复只改变页面引导投影。
 - Browser 清理验收发现远端草稿恢复后 `dirty=false` 会隐藏唯一丢弃入口并把版本误标为“已同步”。新增当前基线精确匹配的 `hasSavedProjectDraft` 投影；恢复保持零写入，但草稿事实与恢复入口持续可见。
 - 暴露入口后继续发现旧 `discardDraft` 以 fire-and-forget DELETE 恢复页面且不清 React Query，导致服务端失败时页面可能假装已丢弃、成功后缓存仍显示草稿。现改为等待 DELETE、成功原子清查询缓存后再重置本地，失败零清理并明确提示。
+- 发布证据：`0311077e` 已推送 `main`；完整后端 `307 passed in 181.14s`、compileall、Vite `index-DMVkuFUt.js / index-hozuMUdC.css` 与 diff check 通过。真实咖啡 v12 覆盖默认首屏减法、完整修复、单当前切点、3 项变化关系门禁、两次一级观看后解锁、远端草稿刷新恢复与原子丢弃；最终 v12、播放头 0、undo disabled、draft null、1280/1280、页面日志为空。最终 API `55592` / Worker `49664`，health `ok`、Alembic `20260813_51`、标准日志正常。
