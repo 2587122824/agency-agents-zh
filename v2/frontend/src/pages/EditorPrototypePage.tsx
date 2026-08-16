@@ -1565,6 +1565,8 @@ function BoundaryActionComparison({
   onRememberAlternativeOutcome,
   onReplaceLeftAsset,
   onReplaceRightAsset,
+  formalOrderSwapAvailable,
+  onSwapToFormalOrder,
   onAdjustStructure,
   onNotice,
   observationKey,
@@ -1596,6 +1598,8 @@ function BoundaryActionComparison({
   onRememberAlternativeOutcome: (sessionKey: string, alternativeKey: string, outcome: 'kept_baseline') => void
   onReplaceLeftAsset: () => void
   onReplaceRightAsset: () => void
+  formalOrderSwapAvailable: boolean
+  onSwapToFormalOrder: () => void
   onAdjustStructure: () => void
   onNotice: (message: string) => void
   observationKey: string
@@ -2877,6 +2881,13 @@ function BoundaryActionComparison({
           ? `其他 ${exhaustedCandidateAlternatives.length} 项合法原子试调也已完整对照并保留 A；当前镜头内容需要进入素材或结构层处理。`
           : '当前源窗和转场合同没有可用的下一类无损试调；当前镜头内容需要进入素材或结构层处理。'}</small>
         <nav aria-label="无损试调耗尽后的恢复操作">
+          {formalOrderSwapAvailable && <button
+            type="button"
+            data-primary="true"
+            disabled={editLocked}
+            title={editLocked ? '画面轨已锁定，不能交换镜头顺序。' : `把 ${left.label} → ${right.label} 原子交换为正式分镜顺序，并自动复检新切点`}
+            onClick={onSwapToFormalOrder}
+          >按正式顺序交换两镜</button>}
           <button type="button" disabled={editLocked} title={editLocked ? '画面轨已锁定，不能替换素材。' : `从未使用的已批准视频中替换 ${left.label}`} onClick={onReplaceLeftAsset}>替换前镜素材</button>
           <button type="button" disabled={editLocked} title={editLocked ? '画面轨已锁定，不能替换素材。' : `从未使用的已批准视频中替换 ${right.label}`} onClick={onReplaceRightAsset}>替换后镜素材</button>
           <button type="button" disabled={editLocked} title={editLocked ? '画面轨已锁定，不能调整镜头结构。' : '退出动作试调并回到时间线片段顺序与移动操作'} onClick={onAdjustStructure}>调整镜头结构</button>
@@ -3192,7 +3203,7 @@ export function EditorPrototypePage() {
     boundaryIndexes: number[]
     position: number
     skippedCount: number
-    scope: 'timeline' | 'slide' | 'trim' | 'history' | 'repair' | 'asset'
+    scope: 'timeline' | 'slide' | 'trim' | 'history' | 'repair' | 'asset' | 'structure'
     beforeMs: number
     afterMs: number
     playbackRate: number
@@ -3295,7 +3306,7 @@ export function EditorPrototypePage() {
   } | null>(null)
   const [pendingBoundaryReview, setPendingBoundaryReview] = useState<{
     keys: string[]
-    scope: 'slide' | 'trim' | 'history' | 'repair' | 'asset'
+    scope: 'slide' | 'trim' | 'history' | 'repair' | 'asset' | 'structure'
   } | null>(null)
   const [boundaryFrameBlendPercent, setBoundaryFrameBlendPercent] = useState(50)
   const [boundaryContinuityOutcomes, setBoundaryContinuityOutcomes] = useState<
@@ -4938,6 +4949,8 @@ export function EditorPrototypePage() {
         ? '组合修复'
         : pendingBoundaryReview.scope === 'asset'
         ? '素材填入'
+        : pendingBoundaryReview.scope === 'structure'
+        ? '镜头顺序交换'
         : '撤销/重做'}成功，但更新后的受影响切点均缺少双侧画面或已不存在，未启动自动试听。`)
       return
     }
@@ -5003,6 +5016,8 @@ export function EditorPrototypePage() {
         ? '已停止组合修复后的新切点试听。'
         : boundaryReviewSession.scope === 'asset'
         ? '已停止素材填入后的新切点试听。'
+        : boundaryReviewSession.scope === 'structure'
+        ? '已停止镜头顺序交换后的新切点试听。'
         : boundaryReviewSession.scope === 'history'
         ? '已停止撤销/重做后的受影响切点试听。'
         : '已停止全时间线切点连续巡检。')
@@ -5066,6 +5081,8 @@ export function EditorPrototypePage() {
       ? '组合修复后试听'
       : boundaryReviewSession.scope === 'asset'
       ? '素材填入后试听'
+      : boundaryReviewSession.scope === 'structure'
+      ? '镜头顺序交换后试听'
       : boundaryReviewSession.scope === 'history'
       ? '撤销/重做后试听'
       : '连续巡检'
@@ -5299,6 +5316,37 @@ export function EditorPrototypePage() {
       `已按正式分镜顺序整理 ${sortable.length} 个画面片段；补充素材、声音和字幕保持原位置${reconciled.resetBoundaryCount ? `，${reconciled.resetBoundaryCount} 组失效的成对转场已恢复为直接切换` : ''}，请重新预览切点。`,
       selectedItem?.id ?? normalized[0]?.id ?? null,
     )
+  }
+
+  const swapBoundaryToFormalOrder = (left: TimelineItem, right: TimelineItem) => {
+    if (blockMainTrackEdit(left)) return
+    const leftIndex = mainItems.findIndex(item => item.id === left.id)
+    const rightIndex = mainItems.findIndex(item => item.id === right.id)
+    const leftSequence = left.asset_id ? shotSequenceByAssetId.get(left.asset_id) : undefined
+    const rightSequence = right.asset_id ? shotSequenceByAssetId.get(right.asset_id) : undefined
+    if (leftIndex < 0 || rightIndex !== leftIndex + 1 || leftSequence == null || rightSequence == null || leftSequence <= rightSequence) {
+      setNotice('当前两镜已不再是可确定交换的正式分镜倒序边界；时间线没有修改。')
+      return
+    }
+    const reordered = [...mainItems]
+    ;[reordered[leftIndex], reordered[rightIndex]] = [reordered[rightIndex], reordered[leftIndex]]
+    const normalized = normalizeMainTrack(reordered, durationMs)
+    const reconciled = reconcileStructuralTransitions(mainItems, normalized)
+    const affectedIds = new Set([left.id, right.id])
+    const reviewKeys = reconciled.rows.slice(0, -1).flatMap((row, index) => {
+      const next = reconciled.rows[index + 1]
+      return row.asset_id && next.asset_id && (affectedIds.has(row.id) || affectedIds.has(next.id))
+        ? [`${row.id}-${next.id}`]
+        : []
+    })
+    resetStructuralPreviewState()
+    setBoundaryAssetReplacementTargetId(null)
+    commitItems(
+      replaceMainTrack(items, reconciled.rows),
+      `已按正式分镜顺序把 ${left.label} → ${right.label} 原子交换为 ${right.label} → ${left.label}${reconciled.resetBoundaryCount ? `；${reconciled.resetBoundaryCount} 组失效的成对转场已恢复为直接切换` : ''}，正在复检新切点。`,
+      right.id,
+    )
+    if (reviewKeys.length) setPendingBoundaryReview({ keys: reviewKeys, scope: 'structure' })
   }
 
   const dropAssetOnItem = (target: TimelineItem, explicitAssetId?: string) => {
@@ -7056,6 +7104,8 @@ export function EditorPrototypePage() {
             ? `组合修复后的新切点试听完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个切点；${sequentialObservationSummary}人工连续性检查仍需逐项确认。`
             : boundaryReviewSession.scope === 'asset'
             ? `素材填入后的新切点试听完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个切点；${sequentialObservationSummary}人工连续性检查仍需逐项确认。`
+            : boundaryReviewSession.scope === 'structure'
+            ? `镜头顺序交换后的新切点试听完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个切点；${sequentialObservationSummary}人工连续性检查仍需逐项确认。`
             : boundaryReviewSession.scope === 'history'
             ? `撤销/重做后的受影响切点试听完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个切点；${sequentialObservationSummary}恢复的人工连续性结果仍需按当前画面确认。`
             : `全时间线切点连续巡检播放完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个可用切点${boundaryReviewSession.skippedCount ? `，跳过 ${boundaryReviewSession.skippedCount} 个含缺口边界` : ''}；${sequentialObservationSummary}人工检查项仍需逐项确认。`)
@@ -7546,6 +7596,8 @@ export function EditorPrototypePage() {
                   ? '停止素材填入切点试听'
                   : boundaryReviewSession.scope === 'repair'
                   ? '停止组合修复切点试听'
+                  : boundaryReviewSession.scope === 'structure'
+                  ? '停止顺序交换切点试听'
                   : boundaryReviewSession.scope === 'history'
                   ? '停止撤销/重做切点试听'
                   : '停止连续巡检'}（${boundaryReviewSession.position + 1}/${boundaryReviewSession.boundaryIndexes.length}）`
@@ -8007,6 +8059,8 @@ export function EditorPrototypePage() {
                          onRememberAlternativeOutcome={rememberBoundaryAlternativeOutcome}
                          onReplaceLeftAsset={() => startBoundaryAssetReplacement(left, '前镜')}
                          onReplaceRightAsset={() => startBoundaryAssetReplacement(right, '后镜')}
+                         formalOrderSwapAvailable={orderWarning}
+                         onSwapToFormalOrder={() => swapBoundaryToFormalOrder(left, right)}
                          onAdjustStructure={() => {
                            selectItem(left)
                            setBoundaryActionComparisonKey(null)
