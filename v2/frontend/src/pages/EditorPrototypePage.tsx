@@ -1563,6 +1563,9 @@ function BoundaryActionComparison({
   onRememberCandidateMotionEvidence,
   onRememberCandidateComparisonOutcome,
   onRememberAlternativeOutcome,
+  onReplaceLeftAsset,
+  onReplaceRightAsset,
+  onAdjustStructure,
   onNotice,
   observationKey,
   onObserved,
@@ -1591,6 +1594,9 @@ function BoundaryActionComparison({
   onRememberCandidateMotionEvidence: (sessionKey: string, sourceKey: string, analysis: BoundaryMotionAnalysis) => void
   onRememberCandidateComparisonOutcome: (sessionKey: string, sourceKey: string, outcome: BoundaryCandidateComparisonOutcome) => void
   onRememberAlternativeOutcome: (sessionKey: string, alternativeKey: string, outcome: 'kept_baseline') => void
+  onReplaceLeftAsset: () => void
+  onReplaceRightAsset: () => void
+  onAdjustStructure: () => void
   onNotice: (message: string) => void
   observationKey: string
   onObserved: (
@@ -2866,9 +2872,17 @@ function BoundaryActionComparison({
             )}
         >{alternative.label}</button>)}
       </div>
-      {!pendingExhaustedCandidateAlternatives.length && <small>{exhaustedCandidateAlternatives.length
-        ? `其他 ${exhaustedCandidateAlternatives.length} 项合法原子试调也已完整对照并保留 A；请回到素材或镜头结构处理。`
-        : '当前源窗和转场合同没有可用的下一类无损试调；请回到素材或镜头结构处理。'}</small>}
+      {!pendingExhaustedCandidateAlternatives.length && <>
+        <small>{exhaustedCandidateAlternatives.length
+          ? `其他 ${exhaustedCandidateAlternatives.length} 项合法原子试调也已完整对照并保留 A；当前镜头内容需要进入素材或结构层处理。`
+          : '当前源窗和转场合同没有可用的下一类无损试调；当前镜头内容需要进入素材或结构层处理。'}</small>
+        <nav aria-label="无损试调耗尽后的恢复操作">
+          <button type="button" disabled={editLocked} title={editLocked ? '画面轨已锁定，不能替换素材。' : `从未使用的已批准视频中替换 ${left.label}`} onClick={onReplaceLeftAsset}>替换前镜素材</button>
+          <button type="button" disabled={editLocked} title={editLocked ? '画面轨已锁定，不能替换素材。' : `从未使用的已批准视频中替换 ${right.label}`} onClick={onReplaceRightAsset}>替换后镜素材</button>
+          <button type="button" disabled={editLocked} title={editLocked ? '画面轨已锁定，不能调整镜头结构。' : '退出动作试调并回到时间线片段顺序与移动操作'} onClick={onAdjustStructure}>调整镜头结构</button>
+        </nav>
+        <small>入口只切换工作区；不会自动选择素材、重排片段、播放或写入草稿。</small>
+      </>}
     </section>}
     <button type="button" className={styles.boundaryDisclosureButton} aria-expanded={advancedTrialsOpen} onClick={() => setAdvancedTrialsOpen(value => !value)}>
       <span><strong>其他无损试调</strong><small>转场、滚动切位、双方相位与分析播放</small></span><b>{advancedTrialsOpen ? '收起' : '展开'}</b>
@@ -3312,6 +3326,7 @@ export function EditorPrototypePage() {
   const [assetSearchOpen, setAssetSearchOpen] = useState(false)
   const [assetSearchQuery, setAssetSearchQuery] = useState('')
   const [gapAssetSelection, setGapAssetSelection] = useState(false)
+  const [boundaryAssetReplacementTargetId, setBoundaryAssetReplacementTargetId] = useState<string | null>(null)
   const [notice, setNotice] = useState('剪辑调整会自动保存为项目草稿；生成可导出版本时才冻结新时间线。')
   const [history, setHistory] = useState<EditorHistorySnapshot[]>([])
   const [future, setFuture] = useState<EditorHistorySnapshot[]>([])
@@ -3403,6 +3418,7 @@ export function EditorPrototypePage() {
     setBoundaryFrameStripKey(null)
     setBoundaryActionComparisonKey(null)
     setBoundaryCandidateGuidanceRequest(null)
+    setBoundaryAssetReplacementTargetId(null)
     setPendingBoundaryPreviewKey(null)
     setBoundaryRollMonitor(null)
     setBoundaryFrameBlendPercent(50)
@@ -3919,10 +3935,14 @@ export function EditorPrototypePage() {
   const selectedGapDurationMs = selectedItem?.track_type === 'main_video' && !selectedItem.asset_id
     ? selectedItem.timeline_out_ms - selectedItem.timeline_in_ms
     : 0
+  const boundaryAssetReplacementTarget = boundaryAssetReplacementTargetId
+    ? mainItems.find(item => item.id === boundaryAssetReplacementTargetId) ?? null
+    : null
   const normalizedAssetSearch = assetSearchQuery.trim().toLocaleLowerCase('zh-CN')
   const visibleAssets = workspace.data?.available_assets.filter(asset => (
     (assetFilter === 'all' || asset.asset_type === assetFilter)
     && (!gapAssetSelection || (asset.asset_type === 'video' && !usedMainVideoAssetIds.has(asset.id)))
+    && (!boundaryAssetReplacementTarget || (asset.asset_type === 'video' && !usedMainVideoAssetIds.has(asset.id)))
     && (!normalizedAssetSearch || [asset.node_key, asset.role, asset.asset_type, asset.shot_code]
       .filter(Boolean)
       .some(value => String(value).toLocaleLowerCase('zh-CN').includes(normalizedAssetSearch)))
@@ -5361,6 +5381,7 @@ export function EditorPrototypePage() {
     )
     setDraggedAssetId(null)
     setGapAssetSelection(false)
+    setBoundaryAssetReplacementTargetId(null)
     if (replacementBoundaryKeys.length) {
       setPendingBoundaryReview({ keys: replacementBoundaryKeys, scope: 'asset' })
     }
@@ -5384,6 +5405,24 @@ export function EditorPrototypePage() {
       : preferredShotCode
         ? `正式分镜 ${preferredShotCode} 当前没有可用的未使用视频。`
         : '当前没有未使用的已批准视频。请返回生产流程生成补充镜头，或先分析缩短目标时长的影响。')
+  }
+
+  const startBoundaryAssetReplacement = (target: TimelineItem, sideLabel: '前镜' | '后镜') => {
+    if (blockMainTrackEdit(target)) return
+    selectItem(target)
+    setBoundaryActionComparisonKey(null)
+    setBoundaryCandidateGuidanceRequest(null)
+    setBoundaryAssetReplacementTargetId(target.id)
+    setGapAssetSelection(false)
+    setAssetFilter('video')
+    setAssetSearchOpen(false)
+    setAssetSearchQuery('')
+    const availableCount = workspace.data?.available_assets.filter(asset => (
+      asset.asset_type === 'video' && !usedMainVideoAssetIds.has(asset.id)
+    )).length ?? 0
+    setNotice(availableCount
+      ? `素材箱已进入${sideLabel}替换：只显示 ${availableCount} 个未用于主画面的已批准视频；点击素材后才替换 ${target.label} 并自动复检新切点。`
+      : `当前没有未使用的已批准视频可替换${sideLabel} ${target.label}；请返回生产流程生成补充镜头，或调整现有镜头结构。`)
   }
 
   const extendPrecedingItemIntoSelectedGap = () => {
@@ -7190,7 +7229,7 @@ export function EditorPrototypePage() {
     </section>
 
     <section className={styles.editingArea}>
-      <aside className={styles.assetPanel} data-gap-selection={gapAssetSelection} data-search={assetSearchOpen}>
+      <aside className={styles.assetPanel} data-gap-selection={gapAssetSelection} data-boundary-replacement={Boolean(boundaryAssetReplacementTarget)} data-search={assetSearchOpen}>
         <header><div><span>ASSETS</span><strong>素材箱</strong></div><button title={assetSearchOpen ? '关闭素材搜索' : '搜索素材'} onClick={() => {
           setAssetSearchOpen(value => {
             if (value) setAssetSearchQuery('')
@@ -7204,6 +7243,11 @@ export function EditorPrototypePage() {
           }
         }} />{assetSearchQuery && <button title="清空搜索" onClick={() => setAssetSearchQuery('')}><X /></button>}</div>}
         {gapAssetSelection && <div className={styles.assetSelectionBanner}><strong>为 {seconds(selectedGapDurationMs)} 缺口选择素材</strong><span>仅显示未用于主画面的已批准视频；点击后按缺口裁切并自动试听新切点</span><button onClick={() => setGapAssetSelection(false)}>退出</button></div>}
+        {boundaryAssetReplacementTarget && <div className={styles.assetSelectionBanner}>
+          <strong>替换 {boundaryAssetReplacementTarget.label}</strong>
+          <span>只显示未用于主画面的已批准视频；点击后按当前片段时长替换并自动复检相邻切点</span>
+          <button onClick={() => setBoundaryAssetReplacementTargetId(null)}>退出</button>
+        </div>}
         <nav>
           {([
             ['all', '全部', Layers3],
@@ -7214,7 +7258,8 @@ export function EditorPrototypePage() {
         </nav>
         <div className={styles.assetList}>
           {gapAssetSelection && visibleAssets.length === 0 && <div className={styles.assetEmpty}><AlertTriangle /><strong>{normalizedAssetSearch ? '没有匹配的未使用视频' : '没有可用的新视频'}</strong><span>{normalizedAssetSearch ? '可清空搜索查看全部未使用候选。' : '重复使用现有镜头会破坏连续性证据，系统不会放行。'}</span></div>}
-          {!gapAssetSelection && normalizedAssetSearch && visibleAssets.length === 0 && <div className={styles.assetEmpty}><Search /><strong>没有匹配素材</strong><span>可更换名称、角色或类型关键词。</span></div>}
+          {boundaryAssetReplacementTarget && visibleAssets.length === 0 && <div className={styles.assetEmpty}><AlertTriangle /><strong>没有可替换视频</strong><span>当前没有未用于主画面的已批准视频；请生成补充镜头或退出后调整结构。</span></div>}
+          {!gapAssetSelection && !boundaryAssetReplacementTarget && normalizedAssetSearch && visibleAssets.length === 0 && <div className={styles.assetEmpty}><Search /><strong>没有匹配素材</strong><span>可更换名称、角色或类型关键词。</span></div>}
           {visibleAssets.map(asset => <button
             key={asset.id}
             draggable={Boolean(asset.duration_ms)}
@@ -7228,6 +7273,10 @@ export function EditorPrototypePage() {
             onClick={() => {
               if (gapAssetSelection && asset.asset_type === 'video' && selectedItem && !selectedItem.asset_id) {
                 dropAssetOnItem(selectedItem, asset.id)
+                return
+              }
+              if (boundaryAssetReplacementTarget && asset.asset_type === 'video') {
+                dropAssetOnItem(boundaryAssetReplacementTarget, asset.id)
                 return
               }
               const item = items.find(row => row.asset_id === asset.id)
@@ -7956,6 +8005,15 @@ export function EditorPrototypePage() {
                          onRememberCandidateMotionEvidence={rememberBoundaryCandidateMotionEvidence}
                          onRememberCandidateComparisonOutcome={rememberBoundaryCandidateComparisonOutcome}
                          onRememberAlternativeOutcome={rememberBoundaryAlternativeOutcome}
+                         onReplaceLeftAsset={() => startBoundaryAssetReplacement(left, '前镜')}
+                         onReplaceRightAsset={() => startBoundaryAssetReplacement(right, '后镜')}
+                         onAdjustStructure={() => {
+                           selectItem(left)
+                           setBoundaryActionComparisonKey(null)
+                           setBoundaryCandidateGuidanceRequest(null)
+                           setBoundaryAssetReplacementTargetId(null)
+                           setNotice(`已回到 ${left.label} → ${right.label} 的时间线结构；可移动、拖拽或按正式分镜整理。系统尚未自动重排或写入草稿。`)
+                         }}
                          onNotice={setNotice}
                          observationKey={continuityObservationKey}
                          onObserved={recordBoundaryContinuityReadyEvidence}

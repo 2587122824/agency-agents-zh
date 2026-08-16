@@ -697,3 +697,4 @@ Alembic 修订：`20260716_09`。
 - 发布 `f6906d39`：完整后端 `306 passed in 190.87s`，compileall、Vite `/assets/index-BDgajzuP.js`、diff check 通过；最终 API `39756` / Worker `15780`、Alembic `20260813_51`、draft null、四日志零错误。
 - 同步动作区完成渐进式收纳：`evidenceDetailsOpen / candidateDetailsOpen / advancedTrialsOpen` 只作为组件页面态。默认主卡呈现问题、进度和单一下一步；详细像素/动作证据、候选列表和高级试调分层展开。引导任务打开候选，B 产生后候选自动收起并打开高级区，结论卡保持一级可见。收纳不改变 source-key 证据、A→B 状态机、候选/替代审核记忆或草稿合同。
 - 发布 `46174f48`：完整后端 `306 passed in 253.76s`，compileall、Vite `/assets/index-B6OAOKKZ.js`、diff check 通过；真实 v12 默认卡约 311px，1280×720 下 html/body `1280/1280`、Inspector `244/244`、动作卡 `200/200`，展开后 B=false、播放媒体 0、页面日志为空。最终 API `26232` / Worker `30492`、Alembic `20260813_51`、健康 `ok`、标准四日志零实际错误。
+- 替代方案终态新增真实恢复入口。`BoundaryActionComparison` 只发出替换前镜、替换后镜或调整结构意图；父页面的 `boundaryAssetReplacementTargetId` 投影未使用已批准视频与目标 banner，实际点击候选才复用 `dropAssetOnItem`。结构入口只关闭动作比较并选择前镜，保留现有移动、拖拽和正式顺序整理操作。三项入口锁轨禁用，进入/退出零 history、零草稿写入、零播放，不改变候选或替代审核记忆。

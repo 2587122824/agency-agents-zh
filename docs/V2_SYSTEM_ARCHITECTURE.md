@@ -433,3 +433,4 @@ render 对每个 context 独立读取当前 outcome，派生 handling/recheck �
 - 客户端恢复镜像相同两层语义：session key 并集后分别深合并 evidence/outcome exact maps；当前 exact key 覆盖远端同 key，空 session 不会覆盖远端非空 session。
 - 恢复权威顺序为：匹配当前 Timeline 基线的远端 `EditorDraftSession` 始终优先，localStorage 只在无匹配远端草稿时作为浏览器崩溃兜底。客户端时间戳不能把本地副本提升到权威远端之上，避免旧空候选 session 被自动回写覆盖服务端审核进度。
 - Inspector 渐进式披露由 `BoundaryActionComparison` 内三个瞬时布尔状态实现，只控制 DOM 可见层级，不进入 `EditorDraftSession`、localStorage、Timeline、history、API 或数据库。证据探针仍保持挂载并完成既有 source-key 门禁；折叠不重建证据、不触发媒体、不改变 B 或审核 outcome。引导请求显式打开候选区，形成 B 后自动收起候选并打开高级试调区；人工结论独立于折叠容器保持可见。
+- 替代试调耗尽后的素材恢复使用页面级 `boundaryAssetReplacementTargetId`。该状态只把素材箱投影为未被 `usedMainVideoAssetIds` 占用的视频，并保存明确目标 item ID；进入、退出或切换到结构处理都不调用 `commitItems`。只有点击具体候选才复用 `dropAssetOnItem` 的替换、成对转场协调、旧边界证据失效、一次 history 提交与新边界自动复检。项目切换显式清空目标 ID；不新增草稿/API/迁移/Timeline 合同或旧版兼容分支。
