@@ -721,6 +721,8 @@ Alembic 修订：`20260716_09`。
 - 衔接质量门禁不增加清单数量：三类允许变化关系继续各 3 项，`jump-readable / location-readable / outfit-readable` 映射到新增 `sequence` 观察，只需一次 1× 完整上下文顺序切点；`same_moment.motion` 保持 action 的同步动作与顺序切点两步。冻结升级为 `timeline-continuity-review.v7`，草稿升级为 `editor-draft-session.v10 / editor-local-draft.v13`。
 - 衔接 Inspector 不再从选中片段同时映射前后两套 `boundaryControl`；`boundaryList` 只渲染现有 `activeBoundary`。原 1/N 导航和连续队列承担切换，全部边界继续参与任务进度和后端冻结，减少的是同屏工具副本而不是审核范围。
 - 观察与修复引导拆分：普通观察以 `observe` 进入，不展开候选或自动选择扫描侧；`sequence` 一级只显示“顺序试播切点”，`action` 一级显示“同步播放动作 / 顺序试播切点”。只有“需调整”使用 `issue` 展开候选修复，续办使用 `resume`。播放仍复用既有完成回调登记证据，不自动修改 outcome。
+
+- 真实 Browser 验收中先发现 sequence 处理入口仍受旧 `mode === 'action'` 条件限制，已把首次待调整定位和显式处理入口统一扩为 `action || sequence`。最终 1280×720 的时间跳转观察只显示 1 个顺序试播主动作，不显示同步播放或候选入口；1× 完播后通过解锁，页面只有 1 个 boundary control 且无横向溢出。验收草稿已丢弃并恢复 Timeline v12。
 - 普通未检查 action 项点击“观察”时同步建立瞬时 guidance request；此前只有待调整/候选续办会设置该请求，导致新节奏门禁打开动作区后仍把邻帧候选误当主任务。该修复只改变页面引导投影。
 - Browser 清理验收发现远端草稿恢复后 `dirty=false` 会隐藏唯一丢弃入口并把版本误标为“已同步”。新增当前基线精确匹配的 `hasSavedProjectDraft` 投影；恢复保持零写入，但草稿事实与恢复入口持续可见。
 - 暴露入口后继续发现旧 `discardDraft` 以 fire-and-forget DELETE 恢复页面且不清 React Query，导致服务端失败时页面可能假装已丢弃、成功后缓存仍显示草稿。现改为等待 DELETE、成功原子清查询缓存后再重置本地，失败零清理并明确提示。
