@@ -7692,11 +7692,6 @@ export function EditorPrototypePage() {
                 selectItem(activeBoundaryCompleteRepair.gap)
                 window.requestAnimationFrame(() => inspectorRef.current?.scrollTo({ top: 0, behavior: 'smooth' }))
               }}>查看一次完整修复方案<ChevronRight /></button>
-              <button
-                className={styles.boundaryInspectorEntrySecondary}
-                disabled={videoTrackLocked}
-                onClick={() => activeBoundary && swapBoundaryToFormalOrder(activeBoundary.left, activeBoundary.right)}
-              >{videoTrackLocked ? '解锁后仅交换这两镜' : '仅交换这两镜'}</button>
             </> : activeBoundaryOrderWarning && activeBoundary ? <>
               <button disabled={videoTrackLocked} onClick={() => swapBoundaryToFormalOrder(activeBoundary.left, activeBoundary.right)}>
                 {videoTrackLocked ? '解锁后交换这两镜' : '按正式顺序交换这两镜'}<ChevronRight />

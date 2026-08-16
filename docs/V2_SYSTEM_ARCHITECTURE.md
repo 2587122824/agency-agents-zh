@@ -441,3 +441,4 @@ render 对每个 context 独立读取当前 outcome，派生 handling/recheck �
 - 缺口的高级替代只使用原生 `details.gapAlternatives` 做渐进披露：完整修复存在时默认闭合，否则默认展开。DOM 内仍保留既有按钮、链接、事件和门禁；展开状态不进入 React 持久状态、draft、history、API 或迁移。
 - 替代试调耗尽后的素材恢复使用页面级 `boundaryAssetReplacementTargetId`。该状态只把素材箱投影为未被 `usedMainVideoAssetIds` 占用的视频，并保存明确目标 item ID；进入、退出或切换到结构处理都不调用 `commitItems`。只有点击具体候选才复用 `dropAssetOnItem` 的替换、成对转场协调、旧边界证据失效、一次 history 提交与新边界自动复检。项目切换显式清空目标 ID；不新增草稿/API/迁移/Timeline 合同或旧版兼容分支。
 - 局部正式顺序交换不保存额外状态。渲染时由当前相邻 `left/right` 的 `shotSequenceByAssetId` 同步派生入口；命令再次复验相邻性和 `leftSequence > rightSequence`，随后只交换这两个 `mainItems`，复用 `normalizeMainTrack`、`reconcileStructuralTransitions`、`resetStructuralPreviewState` 与 `commitItems`。新 `pendingBoundaryReview.scope='structure'` 仅控制自动试听文案与受影响新边界队列，不进入草稿或 Timeline；history 快照仍是唯一撤销事实。该能力不新增 API、迁移、后端字段或运行时兼容。
+- Inspector 的确定性修复投影遵循单主任务约束：完整修复可用时，倒序边界摘要只负责无写入地导航到 gap 事务，不暴露仅交换入口；完整事务不可投影时才回退到局部正式顺序交换。
