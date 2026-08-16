@@ -713,6 +713,7 @@ Alembic 修订：`20260716_09`。
 - Browser 首轮发现完整修复后仍显示基线 v12 的 `TIMELINE_GAP_UNRESOLVED`。现抽取统一条目合同投影并比较当前草稿与已验证 Timeline；条目变化后旧 validation 退出当前任务投影，但仍保留在版本证据，播放头/磁吸/缩放等非合同变化不使其失效。
 - 修复后复检现支持显式连续队列。只有从全局复检入口进入才启用；当前边界最后一项明确通过后，按时间线定位下一未完成边界并打开既有正确观察模式。自动动作只限页面导航与滚动，绝不播放、登记 observation、设置 outcome 或修改 Timeline；返回、编辑、undo/redo 都会停止。
 - 队列运行态复用全时间线进度卡展示“连续复检中 / 剩余 N 个切点”，并把原按钮切为“结束连续复检”。停止只清页面队列标志并保留当前切点、工具和审核结果，避免隐藏自动导航状态或新增同级按钮。
+- 发布证据：`ebc70af1` 已推送 `main`，后端 306 passed，最终 bundle `index-DOe1Ehsr.js / index-BvVK_GIz.css`。真实 UI 证明运行态文案与唯一停止按钮、停止前后服务端 draft row/version/time/playhead 零变化、当前工作区和媒体保持，以及停止后完成第一切点不自动续到第二切点；基线、布局与页面日志清理通过。最终 API `38588` / Worker `47876`，health、Alembic `20260813_51` 与四日志正常。
 - 发布证据：`aab51414` 已推送 `main`，后端 306 passed，最终 bundle `index-DkRdYkBQ.js / index-BvVK_GIz.css`。真实完整修复三切点覆盖自动 `1→2` 续办、返回后停止、最后补充素材边界同步动作真实门禁与 `3/3 → 生成可导出版本` 终态；验收草稿、播放头、布局和页面日志均恢复干净。最终 API `33304` / Worker `44872`，health、Alembic `20260813_51` 与四日志正常。
 - 发布证据：`8cd83439 / 864d37e5` 已推送 `main`，两轮后端均为 306 passed，最终 Vite bundle `index-DOgr2ofo.js / index-BvVK_GIz.css`。咖啡 v12 真实 UI 证明顶部结构优先、零写入定位、完整修复后准确变为“复检 3 个切点”、旧 validation 退场且复检入口进入 `SH-001 → SH-002` 而非旧问题弹窗；基线清理、1280×720 布局和零控制台错误均通过。最终 API `55820` / Worker `38164`，health、Alembic `20260813_51` 与四日志正常。
 - 发布证据：`201e612d / 670e5363` 已推送 `main`；两轮完整后端均为 306 passed，最终 Vite bundle `index-j7aIia_t.js / index-BvVK_GIz.css`。咖啡 v12 真实 UI 已证明零写入导航、折叠替代路径、锁轨门禁、4 段完整修复、3 个切点自动试听、单步 undo/redo 与基线清理；1280×720 无横向溢出且控制台零 warning/error。最终服务 API `41156` / Worker `58336`，health 与 Alembic `20260813_51` 正常，四份标准日志零实际错误。
