@@ -766,6 +766,7 @@
   gap: 9px;
   background: linear-gradient(145deg, #252d2a, #202625);
 }
+.boundaryInspectorEntry[data-order-warning="true"] { background: linear-gradient(145deg, #332722, #28211f); }
 .boundaryInspectorEntry > div { display: grid; gap: 3px; }
 .boundaryInspectorEntry span { color: var(--editor-accent); font-size: 11px; font-weight: 800; letter-spacing: .05em; }
 .boundaryInspectorEntry strong { color: #e0e5e2; font-size: 11px; }
@@ -784,6 +785,17 @@
   cursor: pointer;
 }
 .boundaryInspectorEntry button svg { width: 12px; }
+.boundaryInspectorEntry button:disabled { opacity: .48; cursor: not-allowed; }
+.boundaryInspectorEntry .boundaryInspectorEntrySecondary {
+  height: auto;
+  margin-top: -3px;
+  border: 0;
+  background: transparent;
+  color: #aeb8b3;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .boundarySectionHeader { margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .inspector .boundarySectionHeader h3 { margin: 0; }
 .boundarySectionHeader > div { display: flex; align-items: center; gap: 5px; color: #89938e; }

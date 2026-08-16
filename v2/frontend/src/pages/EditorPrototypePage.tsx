@@ -3741,6 +3741,16 @@ export function EditorPrototypePage() {
     : Math.min(selectedMainPosition, mainBoundaries.length - 1)
   const activeBoundaryIndex = focusedBoundaryIndex >= 0 ? focusedBoundaryIndex : inferredBoundaryIndex
   const activeBoundaryKey = activeBoundaryIndex >= 0 ? mainBoundaries[activeBoundaryIndex]?.key ?? null : null
+  const activeBoundary = activeBoundaryIndex >= 0 ? mainBoundaries[activeBoundaryIndex] ?? null : null
+  const activeBoundaryLeftSequence = activeBoundary?.left.asset_id
+    ? shotSequenceByAssetId.get(activeBoundary.left.asset_id)
+    : undefined
+  const activeBoundaryRightSequence = activeBoundary?.right.asset_id
+    ? shotSequenceByAssetId.get(activeBoundary.right.asset_id)
+    : undefined
+  const activeBoundaryOrderWarning = activeBoundaryLeftSequence != null
+    && activeBoundaryRightSequence != null
+    && activeBoundaryLeftSequence > activeBoundaryRightSequence
   const reviewableBoundaryIndexes = useMemo(
     () => mainBoundaries.flatMap((boundary, index) => boundary.left.asset_id && boundary.right.asset_id ? [index] : []),
     [mainBoundaries],
@@ -3997,6 +4007,8 @@ export function EditorPrototypePage() {
   const validationErrors = lastValidation?.validation_report
     ?? sourceTimeline?.validation_report
     ?? []
+  const structuralTodoCount = Math.max(unresolvedCount, validationErrors.length)
+  const editorTodoCount = structuralTodoCount + continuityReviewIssueCount
   const autoSaveFingerprint = useMemo(
     () => editorDraftFingerprint(
       sourceTimeline,
@@ -7243,23 +7255,21 @@ export function EditorPrototypePage() {
         <button title="重做" disabled={!future.length} onClick={redo}><Redo2 /></button>
         {dirty && <button title="丢弃自动保存的项目草稿" onClick={discardDraft}><RotateCcw /></button>}
         <button className={styles.primaryAction} disabled={saveAndValidate.isPending} onClick={() => {
-          if (dirty && nextUnresolvedBoundaryContinuityReview) {
+          if (nextUnresolvedBoundaryContinuityReview) {
             focusIncompleteBoundaryContinuityReviewAt(nextUnresolvedBoundaryContinuityReview.index)
           }
-          else if (dirty) setConfirmSaveOpen(true)
           else if (validationErrors.length || unresolvedCount) setValidationOpen(true)
+          else if (dirty) setConfirmSaveOpen(true)
           else setNotice('当前版本已经通过检查，可以进入确认阶段。')
         }}>
-          {dirty && continuityReviewIssueCount > 0 ? <AlertTriangle /> : dirty ? <CheckCircle2 /> : unresolvedCount || validationErrors.length ? <AlertTriangle /> : <CheckCircle2 />}
+          {editorTodoCount > 0 ? <AlertTriangle /> : <CheckCircle2 />}
           {saveAndValidate.isPending
             ? '正在生成…'
-            : dirty && continuityReviewIssueCount > 0
-              ? `处理 ${continuityReviewIssueCount} 个衔接检查`
+            : editorTodoCount > 0
+              ? `处理 ${editorTodoCount} 项待办`
               : dirty
                 ? '生成可导出版本'
-                : unresolvedCount || validationErrors.length
-                  ? `处理 ${Math.max(unresolvedCount, validationErrors.length)} 个问题`
-                  : '版本已通过'}
+                : '版本已通过'}
         </button>
       </div>
     </header>
@@ -7278,8 +7288,6 @@ export function EditorPrototypePage() {
       {authorizeDelivery.error && <button onClick={() => setDeliveryAuthorizeOpen(true)}>{authorizeDelivery.error instanceof Error ? authorizeDelivery.error.message : '交付授权失败，请重试'}</button>}
       {uploadDelivery.error && <button onClick={() => setDeliveryStatusOpen(true)}>{uploadDelivery.error instanceof Error ? uploadDelivery.error.message : '交付文件上传失败'}</button>}
       {verifyDelivery.error && <button onClick={() => setDeliveryStatusOpen(true)}>{verifyDelivery.error instanceof Error ? verifyDelivery.error.message : '交付文件验证失败'}</button>}
-      {validationErrors.length > 0 && <button onClick={() => setValidationOpen(true)}>查看 {validationErrors.length} 个检查问题</button>}
-      {continuityReviewIssueCount > 0 && nextUnresolvedBoundaryContinuityReview && <button onClick={() => focusIncompleteBoundaryContinuityReviewAt(nextUnresolvedBoundaryContinuityReview.index)}>处理 {continuityReviewIssueCount} 个衔接检查</button>}
       <code>{lastAutoSavedAt ? `自动保存 ${new Date(lastAutoSavedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} · ` : ''}{workspace.data.aspect_ratio} · {outputFps}fps · {seconds(durationMs)}</code>
     </section>
 
@@ -7543,20 +7551,32 @@ export function EditorPrototypePage() {
             })()}
             {videoTrackLocked && <div className={styles.trimHint}>画面轨锁定期间只允许选择、寻帧和预览，不写入本地草稿。</div>}
           </section>}
-          {selectedItem.track_type === 'main_video' && (previousMainItem || nextMainItem) && <section className={styles.boundaryInspectorEntry}>
+          {selectedItem.track_type === 'main_video' && (previousMainItem || nextMainItem) && <section className={styles.boundaryInspectorEntry} data-order-warning={activeBoundaryOrderWarning}>
             <div>
-              <span>镜头衔接</span>
-              <strong>{activeBoundaryContinuityReview
-                ? activeBoundaryContinuityReview.unresolvedCount > 0
-                  ? `${activeBoundaryContinuityReview.unresolvedCount} 项待检查`
-                  : `${activeBoundaryContinuityReview.passedCount}/${activeBoundaryContinuityReview.requiredCount} 项已通过`
-                : '当前切点含画面缺口'}</strong>
-              <small>需要时再进入切点预览、连续性判断和修复工具。</small>
+              <span>{activeBoundaryOrderWarning ? '结构问题' : '镜头衔接'}</span>
+              <strong>{activeBoundaryOrderWarning && activeBoundary
+                ? `${activeBoundary.left.label} → ${activeBoundary.right.label} 顺序倒退`
+                : activeBoundaryContinuityReview
+                  ? activeBoundaryContinuityReview.unresolvedCount > 0
+                    ? `${activeBoundaryContinuityReview.unresolvedCount} 项待检查`
+                    : `${activeBoundaryContinuityReview.passedCount}/${activeBoundaryContinuityReview.requiredCount} 项已通过`
+                  : '当前切点含画面缺口'}</strong>
+              <small>{activeBoundaryOrderWarning && activeBoundary
+                ? `正式顺序应为 ${activeBoundary.right.label} → ${activeBoundary.left.label}。先修复结构，再判断动作衔接。`
+                : '需要时再进入切点预览、连续性判断和修复工具。'}</small>
             </div>
-            <button onClick={() => {
+            {activeBoundaryOrderWarning && activeBoundary ? <>
+              <button disabled={videoTrackLocked} onClick={() => swapBoundaryToFormalOrder(activeBoundary.left, activeBoundary.right)}>
+                {videoTrackLocked ? '解锁后交换这两镜' : '按正式顺序交换这两镜'}<ChevronRight />
+              </button>
+              <button className={styles.boundaryInspectorEntrySecondary} onClick={() => {
+                setBoundaryInspectorOpen(true)
+                focusBoundaryAt(activeBoundaryIndex)
+              }}>仍要检查当前切点</button>
+            </> : <button onClick={() => {
               setBoundaryInspectorOpen(true)
               focusBoundaryAt(activeBoundaryIndex)
-            }}>检查当前切点<ChevronRight /></button>
+            }}>检查当前切点<ChevronRight /></button>}
           </section>}
           </>}
           {boundaryInspectorOpen && selectedItem.track_type === 'main_video' && (previousMainItem || nextMainItem) && <section>
