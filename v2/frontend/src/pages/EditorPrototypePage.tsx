@@ -8309,7 +8309,7 @@ export function EditorPrototypePage() {
             </div>
             <div className={styles.trimHint}>淡出淡入会同时设置前镜淡出和后镜淡入，并作为一个撤销步骤写入草稿；它不是交叉叠化。正式预览和导出使用同一冻结参数。</div>
           </section>}
-          {selectedItem.track_type === 'main_video' && <section>
+          {boundaryInspectorOpen && selectedItem.track_type === 'main_video' && <section>
             <h3>转场</h3>
             {(['transition_in', 'transition_out'] as const).map(key => {
               const transition = selectedItem.transform[key] as { type?: 'cut' | 'fade'; duration_ms?: number } | undefined
