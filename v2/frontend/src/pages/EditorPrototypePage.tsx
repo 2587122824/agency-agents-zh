@@ -1973,6 +1973,8 @@ function BoundaryActionComparison({
       label: `试用 ${seconds(sequenceRecommendedFadeDurationMs)} 淡出淡入`,
       reason: sequenceTransitionRecommendationCopy.reason,
     }
+  const sequencePrimaryTrialKey = `sequence-primary:${guidedCheckId ?? 'change-readable'}:${sequencePrimaryTrial.type}:${sequencePrimaryTrial.durationMs}`
+  const sequencePrimaryTrialKept = alternativeOutcomes[sequencePrimaryTrialKey] === 'kept_baseline'
   const sequenceRepairGuided = guidedIntent === 'issue' && guidedReviewMode === 'sequence'
   const exhaustedCandidateTransitionTrial = baselinePairedCut && transitionMaximumDurationMs >= 100
     ? { type: 'fade' as const, durationMs: Math.min(200, transitionMaximumDurationMs), label: `试用淡出淡入 ${seconds(Math.min(200, transitionMaximumDurationMs))}` }
@@ -2643,16 +2645,22 @@ function BoundaryActionComparison({
     </header>
     <section className={styles.boundaryPrimaryTask} aria-label={`当前${guidedReviewMode === 'sequence' ? '切点节奏' : '同步动作'}任务`}>
       <span>
-        <strong>{phaseDecisionReady ? '对照已完成，请选择结果' : hasComparisonTrial ? 'B 已准备，下一步完成 A→B 对照' : sequenceRepairGuided ? `先试一个节奏方案：${guidedIssueLabel}` : guidedIssueLabel ? `完成两次观看：${guidedIssueLabel}` : '先检查最接近切点的邻帧'}</strong>
+        <strong>{phaseDecisionReady ? '对照已完成，请选择结果' : hasComparisonTrial ? 'B 已准备，下一步完成 A→B 对照' : sequenceRepairGuided && sequencePrimaryTrialKept ? '推荐节奏已排除，改处理镜头内容' : sequenceRepairGuided ? `先试一个节奏方案：${guidedIssueLabel}` : guidedIssueLabel ? `完成两次观看：${guidedIssueLabel}` : '先检查最接近切点的邻帧'}</strong>
         <small>{phaseCandidateScanSide
           ? `${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}已对照 ${reviewedPhaseCandidateCount}/${nearbyPhaseCandidates.length}${undecidedPhaseCandidateCount ? ` · 待决定 ${undecidedPhaseCandidateCount}` : ''}`
-          : hasComparisonTrial ? tunedTrialSummary : sequenceRepairGuided ? `${sequencePrimaryTrial.reason}；B 只在本地试用，不写草稿。` : guidedIssueLabel ? '先并排看动作阶段，再按真实顺序看完整切点；两次都只记录观看证据，不修改时间线。' : '只在你打开后加载候选；系统不排序、不推荐，也不会自动设置 B。'}</small>
+          : hasComparisonTrial ? tunedTrialSummary : sequenceRepairGuided && sequencePrimaryTrialKept ? '这项 B 已完整对照并保留 A；继续改转场只会重复决策，应回到片段、素材或镜头结构。' : sequenceRepairGuided ? `${sequencePrimaryTrial.reason}；B 只在本地试用，不写草稿。` : guidedIssueLabel ? '先并排看动作阶段，再按真实顺序看完整切点；两次都只记录观看证据，不修改时间线。' : '只在你打开后加载候选；系统不排序、不推荐，也不会自动设置 B。'}</small>
       </span>
-      {sequenceRepairGuided && !hasComparisonTrial && !phaseDecisionReady && <button
+      {sequenceRepairGuided && !sequencePrimaryTrialKept && !hasComparisonTrial && !phaseDecisionReady && <button
         type="button"
         disabled={sequencePrimaryTrial.type === 'fade' && sequencePrimaryTrial.durationMs < 100}
-        onClick={() => chooseTransitionTrial(sequencePrimaryTrial.type, sequencePrimaryTrial.durationMs)}
+        onClick={() => chooseTransitionTrial(sequencePrimaryTrial.type, sequencePrimaryTrial.durationMs, sequencePrimaryTrialKey)}
       >{sequencePrimaryTrial.label}</button>}
+      {sequenceRepairGuided && sequencePrimaryTrialKept && !hasComparisonTrial && !phaseDecisionReady && <button
+        type="button"
+        disabled={editLocked}
+        title={editLocked ? '画面轨已锁定，不能调整片段、素材或镜头结构。' : '退出切点节奏试调，回到当前片段与素材处理'}
+        onClick={onAdjustStructure}
+      >转到片段与素材处理</button>}
       {guidedIssueLabel && guidedReviewMode !== 'sequence' && !hasComparisonTrial && !phaseDecisionReady && <div className={styles.boundaryPrimaryTaskActions}>
         <button type="button" disabled={comparisonDurationMs <= 0} onClick={playing ? pauseMedia : startComparison}>{playing ? '暂停同步播放' : progressMs > 0 ? '重播同步动作' : '同步播放动作'}</button>
         <button type="button" disabled={sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady} onClick={sequencePlaying && phaseSequenceCompareStage === 'idle' ? pauseSequenceMedia : startSequencePreview}>{sequencePlaying && phaseSequenceCompareStage === 'idle' ? '暂停顺序试播' : sequenceProgressMs > 0 ? '重播顺序切点' : '顺序试播切点'}</button>
@@ -8403,6 +8411,7 @@ export function EditorPrototypePage() {
                          onSwapToFormalOrder={() => swapBoundaryToFormalOrder(left, right)}
                          onAdjustStructure={() => {
                            selectItem(left)
+                           setBoundaryInspectorOpen(false)
                            setBoundaryActionComparisonKey(null)
                            setBoundaryCandidateGuidanceRequest(null)
                            setBoundaryAssetReplacementTargetId(null)
