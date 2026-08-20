@@ -1584,6 +1584,7 @@ function BoundaryActionComparison({
   onRememberAlternativeOutcome,
   onReplaceLeftAsset,
   onReplaceRightAsset,
+  replacementCandidateCount,
   formalOrderSwapAvailable,
   onSwapToFormalOrder,
   onAdjustStructure,
@@ -1617,6 +1618,7 @@ function BoundaryActionComparison({
   onRememberAlternativeOutcome: (sessionKey: string, alternativeKey: string, outcome: 'kept_baseline') => void
   onReplaceLeftAsset: () => void
   onReplaceRightAsset: () => void
+  replacementCandidateCount: number
   formalOrderSwapAvailable: boolean
   onSwapToFormalOrder: () => void
   onAdjustStructure: () => void
@@ -2645,10 +2647,10 @@ function BoundaryActionComparison({
     </header>
     <section className={styles.boundaryPrimaryTask} aria-label={`当前${guidedReviewMode === 'sequence' ? '切点节奏' : '同步动作'}任务`}>
       <span>
-        <strong>{phaseDecisionReady ? '对照已完成，请选择结果' : hasComparisonTrial ? 'B 已准备，下一步完成 A→B 对照' : sequenceRepairGuided && sequencePrimaryTrialKept ? '推荐节奏已排除，改处理镜头内容' : sequenceRepairGuided ? `先试一个节奏方案：${guidedIssueLabel}` : guidedIssueLabel ? `完成两次观看：${guidedIssueLabel}` : '先检查最接近切点的邻帧'}</strong>
+        <strong>{phaseDecisionReady ? '对照已完成，请选择结果' : hasComparisonTrial ? 'B 已准备，下一步完成 A→B 对照' : sequenceRepairGuided && sequencePrimaryTrialKept ? replacementCandidateCount > 0 ? '推荐节奏已排除，改用替代素材' : '推荐节奏已排除，调整镜头结构' : sequenceRepairGuided ? `先试一个节奏方案：${guidedIssueLabel}` : guidedIssueLabel ? `完成两次观看：${guidedIssueLabel}` : '先检查最接近切点的邻帧'}</strong>
         <small>{phaseCandidateScanSide
           ? `${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}已对照 ${reviewedPhaseCandidateCount}/${nearbyPhaseCandidates.length}${undecidedPhaseCandidateCount ? ` · 待决定 ${undecidedPhaseCandidateCount}` : ''}`
-          : hasComparisonTrial ? tunedTrialSummary : sequenceRepairGuided && sequencePrimaryTrialKept ? '这项 B 已完整对照并保留 A；继续改转场只会重复决策，应回到片段、素材或镜头结构。' : sequenceRepairGuided ? `${sequencePrimaryTrial.reason}；B 只在本地试用，不写草稿。` : guidedIssueLabel ? '先并排看动作阶段，再按真实顺序看完整切点；两次都只记录观看证据，不修改时间线。' : '只在你打开后加载候选；系统不排序、不推荐，也不会自动设置 B。'}</small>
+          : hasComparisonTrial ? tunedTrialSummary : sequenceRepairGuided && sequencePrimaryTrialKept ? replacementCandidateCount > 0 ? `这项 B 已完整对照并保留 A；当前有 ${replacementCandidateCount} 个未使用已批准视频，下一步只为后镜选择替代素材。` : '这项 B 已完整对照并保留 A；当前没有未使用已批准视频。现有精确重试只服务失败任务，新镜头必须回生产流程建立新合同。' : sequenceRepairGuided ? `${sequencePrimaryTrial.reason}；B 只在本地试用，不写草稿。` : guidedIssueLabel ? '先并排看动作阶段，再按真实顺序看完整切点；两次都只记录观看证据，不修改时间线。' : '只在你打开后加载候选；系统不排序、不推荐，也不会自动设置 B。'}</small>
       </span>
       {sequenceRepairGuided && !sequencePrimaryTrialKept && !hasComparisonTrial && !phaseDecisionReady && <button
         type="button"
@@ -2658,9 +2660,13 @@ function BoundaryActionComparison({
       {sequenceRepairGuided && sequencePrimaryTrialKept && !hasComparisonTrial && !phaseDecisionReady && <button
         type="button"
         disabled={editLocked}
-        title={editLocked ? '画面轨已锁定，不能调整片段、素材或镜头结构。' : '退出切点节奏试调，回到当前片段与素材处理'}
-        onClick={onAdjustStructure}
-      >转到片段与素材处理</button>}
+        title={editLocked
+          ? '画面轨已锁定，不能调整片段、素材或镜头结构。'
+          : replacementCandidateCount > 0
+          ? `只显示 ${replacementCandidateCount} 个未用于主画面的已批准视频，点击后才替换后镜`
+          : '退出切点节奏试调，回到当前片段调整镜头结构'}
+        onClick={replacementCandidateCount > 0 ? onReplaceRightAsset : onAdjustStructure}
+      >{replacementCandidateCount > 0 ? '为后镜选择替代素材' : '调整镜头结构'}</button>}
       {guidedIssueLabel && guidedReviewMode !== 'sequence' && !hasComparisonTrial && !phaseDecisionReady && <div className={styles.boundaryPrimaryTaskActions}>
         <button type="button" disabled={comparisonDurationMs <= 0} onClick={playing ? pauseMedia : startComparison}>{playing ? '暂停同步播放' : progressMs > 0 ? '重播同步动作' : '同步播放动作'}</button>
         <button type="button" disabled={sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady} onClick={sequencePlaying && phaseSequenceCompareStage === 'idle' ? pauseSequenceMedia : startSequencePreview}>{sequencePlaying && phaseSequenceCompareStage === 'idle' ? '暂停顺序试播' : sequenceProgressMs > 0 ? '重播顺序切点' : '顺序试播切点'}</button>
@@ -3955,6 +3961,15 @@ export function EditorPrototypePage() {
     () => new Set(mainItems.flatMap(item => item.asset_id ? [item.asset_id] : [])),
     [mainItems],
   )
+  const unusedApprovedVideoAssetCount = useMemo(
+    () => (workspace.data?.available_assets ?? []).filter(asset => (
+      asset.asset_type === 'video'
+      && asset.duration_ms != null
+      && asset.duration_ms > 0
+      && !usedMainVideoAssetIds.has(asset.id)
+    )).length,
+    [usedMainVideoAssetIds, workspace.data?.available_assets],
+  )
   const selectedGapFormalRecommendations = useMemo(() => {
     if (!selectedItem || selectedItem.track_type !== 'main_video' || selectedItem.asset_id) return []
     const selectedGapIndex = mainItems.findIndex(item => item.id === selectedItem.id)
@@ -4785,8 +4800,23 @@ export function EditorPrototypePage() {
     setPlaying(false)
     setBoundaryPreviewEndMs(null)
     setBoundaryPreviewLoop(null)
+    setBoundaryPreviewRate(1)
     setBoundaryFocusKey(null)
     setBoundaryReviewSession(null)
+    setBoundaryFrameComparisonKey(null)
+    setBoundaryFrameOverlayKey(null)
+    setBoundaryFrameStripKey(null)
+    setBoundaryActionComparisonKey(null)
+    setBoundaryCandidateGuidanceRequest(null)
+    setBoundaryRollMonitor(null)
+    setPendingBoundaryReview(null)
+    setBoundaryFrameBlendPercent(50)
+    setBoundaryInspectorOpen(false)
+    setContinuityQueueActive(false)
+    setBoundaryAssetReplacementTargetId(null)
+    setGapAssetSelection(false)
+    setAssetSearchOpen(false)
+    setAssetSearchQuery('')
     setPendingBoundaryPreviewKey(null)
     setNotice('已丢弃自动保存的项目草稿，恢复到当前时间线版本。')
   }
@@ -5724,6 +5754,7 @@ export function EditorPrototypePage() {
   const startBoundaryAssetReplacement = (target: TimelineItem, sideLabel: '前镜' | '后镜') => {
     if (blockMainTrackEdit(target)) return
     selectItem(target)
+    setBoundaryInspectorOpen(false)
     setBoundaryActionComparisonKey(null)
     setBoundaryCandidateGuidanceRequest(null)
     setBoundaryAssetReplacementTargetId(target.id)
@@ -8407,6 +8438,7 @@ export function EditorPrototypePage() {
                          onRememberAlternativeOutcome={rememberBoundaryAlternativeOutcome}
                          onReplaceLeftAsset={() => startBoundaryAssetReplacement(left, '前镜')}
                          onReplaceRightAsset={() => startBoundaryAssetReplacement(right, '后镜')}
+                         replacementCandidateCount={unusedApprovedVideoAssetCount}
                          formalOrderSwapAvailable={orderWarning}
                          onSwapToFormalOrder={() => swapBoundaryToFormalOrder(left, right)}
                          onAdjustStructure={() => {
