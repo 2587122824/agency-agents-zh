@@ -757,3 +757,5 @@ Alembic 修订：`20260716_09`。
 服务端草稿升级为 `editor-draft-session.v11`，迁移 `20260820_53` 清空旧候选审核会话；本地草稿合同升级为 `editor-local-draft.v14`，新增 `base_snapshot_id`。恢复同时核对活动快照、source Timeline 快照、timeline ID 和 row version；远端草稿也新增活动快照与 source Timeline 快照双门禁，旧 v10/v13 不走运行时兼容。
 
 验证证据：隔离外部 Provider 执行后的完整后端为 `307 passed in 188.61s`，Python compileall、Vite `index-W_GCEGic.js / index-0hUBCTCW.css` 和 diff check 通过。标准脚本已实际执行迁移 `20260816_52 → 20260820_53`。真实咖啡 v12 临时绑定可删除的 SH-001 A/B 回流记录后，顶部只有一个“比较云端新后镜 SH-001”；确认按钮在未播放和只播放 A 时都禁用，A/B 均真实开始播放后才启用。确认后弹层和回流任务消失、媒体 0 路播放，权威草稿精确保存 `schema=v11 / snapshot=snapshot_db4d... / timeline=timeline_a790... / playhead=4709 / outcome=adopted`；html/body/viewport 均为 1280，无页面 warning/error。验收后通过正式 UI 丢弃草稿并删除临时 revision、asset 与 MP4，最终 Timeline v12、播放头 0、draft null、revision_returns 0。
+
+发布证据：功能提交 `81be3710` 已推送 `main`。提交后标准重启 API `61724` / Worker `66308`，创建时间 `2026-08-20 11:05:18`；health ok、8766 listener 等于 API PID、Alembic runtime/head `20260820_53`、咖啡 draft null。API/Worker 四份标准日志均为 0 字节，无实际错误。
