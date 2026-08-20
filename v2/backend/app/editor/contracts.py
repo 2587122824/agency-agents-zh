@@ -160,7 +160,7 @@ class EditorBoundaryCandidateReviewSession(BaseModel):
     measured_motion_evidence: dict[str, EditorBoundaryMotionAnalysis] = Field(max_length=8)
     comparison_outcomes: dict[
         str,
-        Literal["completed", "kept_baseline", "shortlisted"],
+        Literal["completed", "kept_baseline", "shortlisted", "adopted"],
     ] = Field(max_length=8)
     alternative_outcomes: dict[
         str,
@@ -206,7 +206,7 @@ class SaveEditorDraft(BaseModel):
 
 
 class EditorDraftRead(BaseModel):
-    schema_version: Literal["editor-draft-session.v10"] = "editor-draft-session.v10"
+    schema_version: Literal["editor-draft-session.v11"] = "editor-draft-session.v11"
     project_id: str
     snapshot_id: str
     base_timeline_id: str
@@ -364,11 +364,22 @@ class EditorShotRead(BaseModel):
     continuity_relation: str
 
 
+class EditorRevisionReturnRead(BaseModel):
+    request_id: str
+    shot_code: str
+    issue_code: str
+    rationale: str
+    source_asset: EditorAssetRead
+    replacement_asset_id: str
+    current_timeline_item_id: str
+
+
 class EditorWorkspaceView(BaseModel):
     project_id: str
     project_title: str
     project_status: str
     active_snapshot_id: str | None
+    current_timeline_id: str | None
     duration_ms: int
     aspect_ratio: str
     audio_mode: str
@@ -376,6 +387,7 @@ class EditorWorkspaceView(BaseModel):
     quality_output_gaps: list[dict]
     shot_sequence: list[EditorShotRead]
     available_assets: list[EditorAssetRead]
+    revision_returns: list[EditorRevisionReturnRead]
     timelines: list[TimelineRead]
     latest_editor_run: dict | None
     next_action: dict

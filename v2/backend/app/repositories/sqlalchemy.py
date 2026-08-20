@@ -1048,8 +1048,11 @@ class SqlAlchemyEditorRepository:
             .order_by(TimelineItem.track_type, TimelineItem.sequence_number)
         ))
 
-    def has_timeline(self, project_id: str) -> bool:
-        return self.session.scalar(select(Timeline.id).where(Timeline.project_id == project_id)) is not None
+    def has_timeline(self, project_id: str, snapshot_id: str) -> bool:
+        return self.session.scalar(select(Timeline.id).where(
+            Timeline.project_id == project_id,
+            Timeline.snapshot_id == snapshot_id,
+        )) is not None
 
     def next_timeline_version(self, project_id: str) -> int:
         current = self.session.scalar(select(func.max(Timeline.version_number)).where(

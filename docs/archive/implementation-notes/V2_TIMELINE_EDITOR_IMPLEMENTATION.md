@@ -745,3 +745,15 @@ Alembic 修订：`20260716_09`。
 - sequence 排除态在没有未使用视频时不再必然停在结构调整。若后镜对应 EditorAsset 有 `shot_code + dag_node_id`，主卡唯一按钮为“发起后镜调整”；弹层预填当前 `left → right`、原 continuity check 和后镜 shot code，只调用既有 `requestAssetRevision(..., storyboard, content_mismatch)` 建立新分镜草案并导航到 Plan revision。当前剪辑不写入，云端生成和费用确认继续留在后续生产合同。Editor workspace DTO 同步增加资产 `row_version` 以满足现有并发门禁；后镜来源不完整时保留结构调整回退。前端生产构建已通过，相关 editor workspace 与 storyboard revision API 测试 `2 passed`。
 - Browser 在咖啡 v12 的 `SH-002 → SH-003.video` 实测无候选路径：排除 `fade:200` 后主卡仅有“发起后镜调整”；弹层显示目标 SH-003、原问题、预填要求、时间线不变及零费用边界。取消后项目 revision request 仍为 0；正式丢弃草稿后 v12、播放头 0、媒体/dialog 0、draft null、页面宽度 `1280/1280/1280`。完整后端 `307 passed in 230.75s`，compileall、Vite `index-CbuRttN_.js / index-B_wTlrlJ.css` 与 diff check 通过。
 - 发布证据：`cb571761` 已推送 `main`。标准重启 API `55896` / Worker `21364`，创建时间 `2026-08-20 10:24:16`；health ok、8766 listener 等于 API PID、Alembic runtime/head `20260816_52`、draft null。API 日志只有正常项目/健康/草稿读取与 Uvicorn 启动，Worker 日志为空。
+
+## 2026-08-20：新快照剪辑隔离与云端后镜 A/B 回流
+
+本轮先修复云端回流前置的一致性缺口。过去 `editor_workspace()` 直接用项目历史 `timelines[0]` 驱动当前任务，Editor Prototype 同样取第一条时间线，且 `has_timeline(project_id)` 会让旧快照历史阻止新快照首个候选。现在 DTO 显式返回 `current_timeline_id`，后端只按活动快照派生当前时间线和 next action，两个剪辑入口都按该 ID 默认选择；Repository 首个时间线门禁改为 `(project_id, snapshot_id)`，项目级 version number 仍连续递增。
+
+分镜 revision/manual revision 确认时新增同事务剪辑失效：收集被 supersede 的快照 ID，删除项目 `EditorDraftSession`，把这些快照下仍非 `superseded` 的 Timeline 转为历史并递增 row version。活动快照随后清空，新生产快照形成前 workspace 返回 `current_timeline_id=null / CREATE_PRODUCTION_SNAPSHOT`，旧 confirmed Timeline 只保留在历史列表。
+
+云端新后镜回流没有新增常驻按钮。后端 `revision_returns` 仅在 storyboard revision 的 resulting plan 等于活动快照 plan、原资产和当前资产都是真实视频、且当前 TimelineItem 已引用同 shot code 的新资产时产生。前端顶部当前任务优先显示一次“比较云端新后镜”；弹层并排加载旧快照 A 与当前快照 B，两边都触发真实播放后才允许确认。确认复用当前 `candidate_review_sessions.comparison_outcomes=adopted` 写项目草稿证据并定位 B，不直接创建/确认 Timeline；不满意则复用既有 storyboard revision 再次发起调整。显式 `adopted` 避免把最终采用冒充原有 `shortlisted` 暂存语义。
+
+服务端草稿升级为 `editor-draft-session.v11`，迁移 `20260820_53` 清空旧候选审核会话；本地草稿合同升级为 `editor-local-draft.v14`，新增 `base_snapshot_id`。恢复同时核对活动快照、source Timeline 快照、timeline ID 和 row version；远端草稿也新增活动快照与 source Timeline 快照双门禁，旧 v10/v13 不走运行时兼容。
+
+验证证据：隔离外部 Provider 执行后的完整后端为 `307 passed in 188.61s`，Python compileall、Vite `index-W_GCEGic.js / index-0hUBCTCW.css` 和 diff check 通过。标准脚本已实际执行迁移 `20260816_52 → 20260820_53`。真实咖啡 v12 临时绑定可删除的 SH-001 A/B 回流记录后，顶部只有一个“比较云端新后镜 SH-001”；确认按钮在未播放和只播放 A 时都禁用，A/B 均真实开始播放后才启用。确认后弹层和回流任务消失、媒体 0 路播放，权威草稿精确保存 `schema=v11 / snapshot=snapshot_db4d... / timeline=timeline_a790... / playhead=4709 / outcome=adopted`；html/body/viewport 均为 1280，无页面 warning/error。验收后通过正式 UI 丢弃草稿并删除临时 revision、asset 与 MP4，最终 Timeline v12、播放头 0、draft null、revision_returns 0。

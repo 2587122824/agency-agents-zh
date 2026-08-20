@@ -1207,8 +1207,9 @@ def test_editor_repository_contract_preserves_timeline_versions_items_and_asset_
             session.commit()
 
             assert editor.timeline(candidate.id).id == candidate.id  # type: ignore[union-attr]
-            assert editor.has_timeline(project.id) is True
-            assert editor.has_timeline(other.id) is False
+            assert editor.has_timeline(project.id, "snapshot-editor") is True
+            assert editor.has_timeline(project.id, "snapshot-other") is False
+            assert editor.has_timeline(other.id, "snapshot-editor") is False
             assert editor.next_timeline_version(project.id) == 3
             assert editor.next_timeline_version(other.id) == 1
             assert [row.id for row in editor.timeline_items(candidate.id)] == [earlier_item.id, later_item.id]

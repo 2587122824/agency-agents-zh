@@ -51,12 +51,14 @@ from ..db.models import (
     AgentRun,
     AssetRevisionRequest,
     CreativeBriefCandidate,
+    EditorDraftSession,
     PlanVersion,
     ProductionSnapshot,
     Project,
     RequirementVersion,
     Shot,
     ShotPlanCandidate,
+    Timeline,
     utc_now,
 )
 from ..repositories import PlanningRepository, SqlAlchemyDecisionRepository, SqlAlchemyPlanningRepository
@@ -1411,10 +1413,12 @@ def decide_shot_plan(
         AssetRevisionRequest.resulting_candidate_id == candidate.id,
         AssetRevisionRequest.status == "candidate_created",
     ))
+    invalidated_snapshot_ids: set[str] = set()
     if (revision_request or replaces_manual_plan_revision) and project.active_snapshot_id:
         old_snapshot = session.get(ProductionSnapshot, project.active_snapshot_id)
         if old_snapshot:
             old_snapshot.status = "superseded"
+            invalidated_snapshot_ids.add(old_snapshot.id)
         project.active_snapshot_id = None
     if replaces_manual_plan_revision and replaced_plan_ids:
         old_snapshots = list(session.scalars(select(ProductionSnapshot).where(
@@ -1424,6 +1428,19 @@ def decide_shot_plan(
         )))
         for old_snapshot in old_snapshots:
             old_snapshot.status = "superseded"
+            invalidated_snapshot_ids.add(old_snapshot.id)
+    if invalidated_snapshot_ids:
+        draft = session.get(EditorDraftSession, project.id)
+        if draft:
+            session.delete(draft)
+        old_timelines = list(session.scalars(select(Timeline).where(
+            Timeline.project_id == project.id,
+            Timeline.snapshot_id.in_(invalidated_snapshot_ids),
+            Timeline.status != "superseded",
+        )))
+        for old_timeline in old_timelines:
+            old_timeline.status = "superseded"
+            old_timeline.row_version += 1
     version_number = repository.next_plan_version_number(project.id)
     plan = PlanVersion(
         project_id=project.id,

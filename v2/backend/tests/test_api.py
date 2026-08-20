@@ -23,7 +23,7 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 from v2.backend.app.main import app
 from v2.backend.app.db.session import Base, engine
 from v2.backend.app.db.session import SessionLocal
-from v2.backend.app.db.models import AgentInputManifest, AgentRun, Asset, AssetReviewDecision, AssetRevisionRequest, Attachment, CommandReceipt, CostEvent, CosyVoiceValidationRun, CreativeBriefCandidate, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, PlanVersion, ProductionSnapshot, Project, ProjectEvent, QCFinding, QCReport, QCReportCandidate, RequirementVersion, Shot, ShotPlanCandidate, StoragePolicyVersion, Timeline, TimelineItem, VoiceCloneAuthorizationVersion, WorkflowSlotVersion, WorkAttempt, WorkItem
+from v2.backend.app.db.models import AgentInputManifest, AgentRun, Asset, AssetReviewDecision, AssetRevisionRequest, Attachment, CommandReceipt, CostEvent, CosyVoiceValidationRun, CreativeBriefCandidate, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, EditorDraftSession, Entity, EntityVersion, PlanVersion, ProductionSnapshot, Project, ProjectEvent, QCFinding, QCReport, QCReportCandidate, RequirementVersion, Shot, ShotPlanCandidate, StoragePolicyVersion, Timeline, TimelineItem, VoiceCloneAuthorizationVersion, WorkflowSlotVersion, WorkAttempt, WorkItem
 from v2.backend.app.creation.completeness import evaluate_requirement
 from v2.backend.app.creation.service import _validated_update_value
 from sqlalchemy import select
@@ -5968,8 +5968,22 @@ def test_storyboard_asset_revision_creates_explicit_draft_and_new_plan(client: T
             storage_backend="local", provider_output_manifest={}, state="review_required",
         )
         session.add(asset)
+        old_timeline = Timeline(
+            project_id=project["id"], snapshot_id=snapshot["id"], version_number=1,
+            status="confirmed", source="user", output_spec=snapshot["output_spec"],
+            track_config={"audio_enabled": False, "subtitle_enabled": False, "snap_enabled": True},
+            row_version=1,
+        )
+        session.add(old_timeline)
+        session.flush()
+        session.add(EditorDraftSession(
+            project_id=project["id"], snapshot_id=snapshot["id"], base_timeline_id=old_timeline.id,
+            base_timeline_row_version=old_timeline.row_version,
+            track_config=old_timeline.track_config, items=[], updated_by="local-user",
+        ))
         session.commit()
         asset_id = asset.id
+        old_timeline_id = old_timeline.id
 
     command = {
         "command_id": "asset-revision-command-001",
@@ -6059,10 +6073,18 @@ def test_storyboard_asset_revision_creates_explicit_draft_and_new_plan(client: T
         stored_project = session.get(Project, project["id"])
         old_snapshot = session.get(ProductionSnapshot, snapshot["id"])
         request = session.get(AssetRevisionRequest, result["request"]["id"])
+        invalidated_timeline = session.get(Timeline, old_timeline_id)
         assert stored_project is not None and stored_project.active_snapshot_id is None
         assert old_snapshot is not None and old_snapshot.status == "superseded"
         assert request is not None and request.status == "plan_confirmed"
         assert request.resulting_plan_version_id == new_plan["id"]
+        assert invalidated_timeline is not None and invalidated_timeline.status == "superseded"
+        assert invalidated_timeline.row_version == 2
+        assert session.get(EditorDraftSession, project["id"]) is None
+    editor_workspace = client.get(f"/api/v1/projects/{project['id']}/editor-workspace")
+    assert editor_workspace.status_code == 200
+    assert editor_workspace.json()["current_timeline_id"] is None
+    assert editor_workspace.json()["next_action"]["code"] == "CREATE_PRODUCTION_SNAPSHOT"
     stale_branch = client.post(
         f"/api/v1/projects/{project['id']}/assets/{asset_id}:request-revision",
         json={**command, "command_id": "asset-revision-stale-plan-001"},
@@ -6903,13 +6925,53 @@ def test_editor_assistant_creates_auditable_timeline_candidate_for_manual_confir
     assert [item["asset_id"] for item in timeline["items"]] == [item["id"] for item in video_assets]
     assert all(item["transform"]["editor_assistant"]["selection_reason"] for item in timeline["items"])
     assert all(item["transform"]["editor_assistant"]["qc_report_ids"] for item in timeline["items"])
+    with SessionLocal() as session:
+        replacement_asset = session.get(Asset, video_assets[0]["id"])
+        assert replacement_asset is not None and replacement_asset.dag_node_id
+        node = session.get(DAGNode, replacement_asset.dag_node_id)
+        assert node is not None and node.shot_id
+        shot = session.get(Shot, node.shot_id)
+        assert shot is not None
+        source_asset = Asset(
+            project_id=project["id"], snapshot_id=snapshot["id"], dag_node_id=node.id,
+            output_index=99, asset_type="video", role="generated_video",
+            uri=f"runtime://assets/{project['id']}/old-{shot.shot_code}.mp4",
+            storage_backend="local", provider_output_manifest={"revision_source": True},
+            content_hash=hashlib.sha256(f"old-{project['id']}-{shot.shot_code}".encode()).hexdigest(),
+            mime_type="video/mp4", byte_size=1, width=1920, height=1080,
+            duration_ms=replacement_asset.duration_ms, state="used",
+        )
+        session.add(source_asset)
+        session.flush()
+        revision_request = AssetRevisionRequest(
+            project_id=project["id"], asset_id=source_asset.id, snapshot_id=snapshot["id"],
+            plan_version_id=snapshot["plan_version_id"], shot_id=shot.id, shot_code=shot.shot_code,
+            issue_scope="storyboard", issue_code="content_mismatch",
+            rationale="旧后镜与前镜的动作承接不顺，需要云端生成新的后镜。",
+            status="plan_confirmed", source_asset_state="used", source_asset_row_version=1,
+            resulting_plan_version_id=snapshot["plan_version_id"], created_by="local-user",
+        )
+        session.add(revision_request)
+        session.commit()
+        revision_request_id = revision_request.id
+        source_asset_id = source_asset.id
     workspace = client.get(f"/api/v1/projects/{project['id']}/editor-workspace").json()
     assert workspace["latest_editor_run"]["status"] == "succeeded"
     assert workspace["next_action"]["code"] == "VALIDATE_TIMELINE"
+    assert workspace["current_timeline_id"] == timeline["id"]
+    assert len(workspace["revision_returns"]) == 1
+    revision_return = workspace["revision_returns"][0]
+    assert revision_return["request_id"] == revision_request_id
+    assert revision_return["shot_code"] == workspace["shot_sequence"][0]["shot_code"]
+    assert revision_return["issue_code"] == "content_mismatch"
+    assert revision_return["source_asset"]["id"] == source_asset_id
+    assert revision_return["source_asset"]["state"] == "used"
+    assert revision_return["replacement_asset_id"] == video_assets[0]["id"]
+    assert revision_return["current_timeline_item_id"] == timeline["items"][0]["id"]
     assert [shot["sequence_number"] for shot in workspace["shot_sequence"]] == [1, 2, 3]
     assert [shot["shot_code"] for shot in workspace["shot_sequence"]] == ["SH-001", "SH-002", "SH-003"]
     video_workspace_assets = sorted(
-        (asset for asset in workspace["available_assets"] if asset["asset_type"] == "video"),
+        (asset for asset in workspace["available_assets"] if asset["id"] in {row["id"] for row in video_assets}),
         key=lambda asset: asset["shot_sequence_number"],
     )
     assert [asset["shot_code"] for asset in video_workspace_assets] == ["SH-001", "SH-002", "SH-003"]
@@ -8036,7 +8098,10 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
     candidate_review_sessions = {
         "stable-review-session": {
             "measured_motion_evidence": {"exact-candidate-source": motion_analysis},
-            "comparison_outcomes": {"exact-candidate-source": "shortlisted"},
+            "comparison_outcomes": {
+                "exact-candidate-source": "shortlisted",
+                "cloud-revision-source": "adopted",
+            },
             "alternative_outcomes": {"transition:fade:200": "kept_baseline"},
         },
     }
@@ -8091,7 +8156,7 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
         },
     )
     assert saved_draft.status_code == 200
-    assert saved_draft.json()["schema_version"] == "editor-draft-session.v10"
+    assert saved_draft.json()["schema_version"] == "editor-draft-session.v11"
     assert saved_draft.json()["playhead_ms"] == 12_000
     assert saved_draft.json()["continuity_outcomes"] == {
         first_boundary_key: {"motion": "needs_adjustment", "subject": "passed"},

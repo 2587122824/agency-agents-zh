@@ -462,3 +462,21 @@ render 对每个 context 独立读取当前 outcome，派生 handling/recheck �
 - 父页面从 `available_assets` 与当前 `usedMainVideoAssetIds` 同步派生 `unusedApprovedVideoAssetCount`，只统计有正时长的视频，并传入当前单边界比较组件。sequence 排除态在计数大于零时调用既有 `startBoundaryAssetReplacement(right)`；该函数现在同时关闭衔接 Inspector，素材箱继续用原 `boundaryAssetReplacementTargetId` 过滤未使用视频，实际点击候选才执行 `dropAssetOnItem`。计数为零时调用 `onAdjustStructure`。该分支不查询模型、不触发 Provider、WorkItem 或 retry API；生产精确重试的失败任务门禁保持不变。
 - `discardDraft` 继续以服务端 `DELETE editor draft` 为提交边界：请求失败立即返回，零页面清理；成功后除恢复 `sourceTimeline.items / track_config` 和撤销栈外，统一清空 `boundaryAssetReplacementTargetId`、`gapAssetSelection`、素材搜索、boundary Inspector、候选引导/比较、帧比较/叠加/帧带、roll monitor、连续复检和待处理复检，并复位预览速率与混合比例。所有这些字段仍是 React 页面瞬时状态，不进入草稿或持久合同。
 - sequence 无候选续办复用既有 `AssetRevisionRequest`，不直接构造 WorkItem。`EditorWorkspace.available_assets` 的 `EditorAssetRead` 增加权威 `row_version`，前端只在右侧资产同时有 `shot_code / dag_node_id` 时开放“发起后镜调整”；确认以该行版本调用 `POST assets/{asset_id}:request-revision`，固定分类为 `storyboard/content_mismatch` 并携带当前切点的人工说明。Revision 服务继续负责资产/快照/活动方案/分镜归属和并发版本门禁，生成 `revision_draft` 后返回现有 Plan 路径。Provider 请求、成本事件与 WorkItem 仍只可能在后续新方案确认、影响分析和快照提交阶段产生。
+
+## 2026-08-20：快照隔离与云端修订结果回流
+
+### 当前时间线投影
+
+`EditorWorkspaceView` 同时返回全部 `timelines` 历史和单值 `current_timeline_id`。后者只允许指向 `timeline.snapshot_id == project.active_snapshot_id` 的最新项目时间线；`next_action`、正式剪辑台和设置页默认选择都只消费该 ID。新快照没有时间线时返回 `null`，项目历史时间线不能再阻止当前快照调用 Editor Assistant 或创建首个候选。
+
+Repository 的存在性合同由项目级 `has_timeline(project_id)` 改为快照级 `has_timeline(project_id, snapshot_id)`。时间线版本号仍按项目递增，以保留单调审计序列；首个候选门禁则以活动快照为边界。
+
+### 分镜修订失效事务
+
+确认资产分镜修订或人工分镜修订时，在同一数据库事务中执行：旧 ProductionSnapshot 标记 `superseded`、项目 `active_snapshot_id` 清空、对应非历史 Timeline 标记 `superseded` 并递增 row version、删除项目 `EditorDraftSession`，然后创建新的 PlanVersion。该路径不删除历史时间线、TimelineItem、资产、交付或费用证据。
+
+### 云端结果关联
+
+`revision_returns` 是只读派生 DTO，不新增供应商状态：以当前活动快照的 `plan_version_id` 查找已 `plan_confirmed` 的 storyboard `AssetRevisionRequest`，再用 `shot_code` 匹配当前快照可用视频，并要求该视频已被当前 TimelineItem 引用。返回旧 source asset、当前 replacement asset 和 TimelineItem 身份。前端把确认结果复用到 `EditorDraftSession.candidate_review_sessions`，key 为精确 request/asset 对，最终采用值为 `adopted`；不自动确认 Timeline、不自动提交费用或 Provider 调用。
+
+服务端合同升级为 `editor-draft-session.v11`，迁移 `20260820_53` 显式清空旧候选审核会话；本地恢复合同升级为 `editor-local-draft.v14`：`base_snapshot_id + base_timeline_id + base_row_version` 必须全部命中，远端草稿额外核对 `snapshot_id`。不提供 v10/v13 运行时兼容读取。

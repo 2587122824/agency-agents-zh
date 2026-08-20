@@ -683,3 +683,12 @@ v2/runtime/worker.err.log
 - 当前开发把 sequence 排除且无未使用素材时的死路接入既有云端生产闭环。若后镜素材有明确 `shot_code + dag_node_id`，唯一动作从“调整镜头结构”升级为“发起后镜调整”；按需弹层显示当前切点、目标后镜、原问题和可编辑调整要求。确认只调用既有 `assets/{asset_id}:request-revision`，以 `storyboard/content_mismatch` 创建新分镜草案并导航到现有方案修订页；当前 Timeline、草稿和素材均不修改，本步骤不创建 WorkItem、不调用 Provider、不产生费用。新分镜确认后仍走影响分析、生产快照和独立云端费用授权。后镜不可追溯时继续只给结构调整，不伪造能力。为服务并发校验，`EditorAssetRead` 显式增加当前 `row_version`；无数据库迁移或兼容分支。
 - 真实咖啡 v12 在 1280×720 验收无候选云端续办：正式四段占用全部视频后，对 `SH-002 → SH-003.video` 时间跳转完成 `fade:200` A→B 并保留 A，原位只出现一个“发起后镜调整”。弹层精确显示目标 `SH-003`、原 continuity check、当前时间线保持不变、预填人工调整要求及“零 Provider / 零 WorkItem / 零费用”；未确认即取消，数据库该项目 `AssetRevisionRequest` 仍为 0。正式 UI 丢弃验收草稿后 Timeline v12、播放头 0、媒体 0、dialog 0、draft null、html/body/viewport `1280/1280/1280`。完整后端隔离外部执行后 `307 passed in 230.75s`，Python compileall、Vite bundle `index-CbuRttN_.js / index-B_wTlrlJ.css` 与 diff check 通过。
 - 发布提交 `cb571761` 已推送 `main`。标准脚本重启 API `55896` / Worker `21364`，创建时间均为 `2026-08-20 10:24:16`；health `ok`，8766 listener 精确等于 API PID，Alembic runtime/head 均为 `20260816_52`，权威 editor draft 为 `null`。API 日志仅正常项目读取、健康/草稿 GET 与 Uvicorn 启动，Worker 两份日志为空；工作树只保留未提交的 `my_workspace/my_asset_library/library.json`。
+
+## 2026-08-20 当前开发：云端后镜回流闭环
+
+- 已实现但尚待本轮最终发布：新分镜确认会原子 supersede 旧快照时间线并删除 EditorDraftSession；workspace 新增 `current_timeline_id`，历史时间线不再驱动当前任务；时间线存在性门禁改为快照级。
+- `editor-draft-session.v11` 新增云端最终采用结论 `adopted`，迁移 `20260820_53` 清空旧候选审核会话；`editor-local-draft.v14` 新增 `base_snapshot_id`。本地/远端恢复都必须命中活动快照、当前时间线及 row version，不兼容 v10/v13。
+- workspace 新增只读 `revision_returns`，只认完整 `AssetRevisionRequest → resulting plan → active snapshot → current TimelineItem` 追溯链。真实命中时顶部唯一当前任务显示“比较云端新后镜”，A/B 都播放后才可确认 B；确认以 `adopted` 写入项目草稿审核证据，不自动确认 Timeline 或产生 Provider/费用。
+- 定向测试已通过；第一次全量回归为 `306 passed / 1 failed`，唯一失败来自当前 shell 继承 `V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED=true`，需按测试合同隔离为 false 后重跑。Vite 当前构建产物为 `index-DKaCClgM.js / index-0hUBCTCW.css`。
+- 尚待：提交推送、最终标准重启和发布证据。不要提交 `my_workspace/my_asset_library/library.json`。
+- 完整后端在隔离外部执行后 `307 passed in 188.61s`，Python compileall、Vite `index-W_GCEGic.js / index-0hUBCTCW.css` 与 diff check 通过。真实咖啡 v12 临时建立可删除的 SH-001 回流关联：顶部唯一任务命中；确认按钮在零播放、仅 A 播放时均 disabled，A/B 都真实开始播放后 enabled。确认后权威草稿为 `editor-draft-session.v11 / snapshot_db4d... / timeline_a790... / playhead_ms=4709 / cloud outcome=adopted`，入口消失、媒体全暂停、html/body/viewport `1280/1280/1280`、页面 warning/error 为空。随后通过正式 UI 丢弃草稿，并删除临时 revision、asset 与 MP4；最终 v12、播放头 0、draft null、revision_returns 0。

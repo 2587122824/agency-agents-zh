@@ -173,7 +173,8 @@ export function EditorPage() {
   const upload = useMutation({ mutationFn: () => api.uploadDelivery(projectId, delivery.data!.attempts[0], deliveryFile!), onSuccess: async () => { setDeliveryFile(null); await refresh() } })
   const verify = useMutation({ mutationFn: () => api.verifyDelivery(projectId, delivery.data!.attempts[0]), onSuccess: refresh })
   const editorProjects = projects.data?.filter(project => ['quality_review', 'editing', 'delivery_ready', 'blocked', 'completed'].includes(project.status)) ?? []
-  const selectedTimeline = workspace.data?.timelines.find(row => row.id === selectedTimelineId) ?? workspace.data?.timelines[0] ?? null
+  const currentTimeline = workspace.data?.timelines.find(row => row.id === workspace.data?.current_timeline_id) ?? null
+  const selectedTimeline = workspace.data?.timelines.find(row => row.id === selectedTimelineId) ?? currentTimeline
   const selectedAsset = workspace.data?.available_assets.find(asset => asset.id === selectedAssetId) ?? null
   const subtitlePreview = useQuery({
     queryKey: ['subtitle-preview', projectId, selectedAssetId],
@@ -198,6 +199,10 @@ export function EditorPage() {
     setDeliveryMethod(null)
     setDeliveryFile(null)
   }, [projectId])
+
+  useEffect(() => {
+    setSelectedTimelineId(workspace.data?.current_timeline_id ?? '')
+  }, [workspace.data?.current_timeline_id])
 
   useEffect(() => {
     if (draftMode !== 'view' || !selectedTimeline) return

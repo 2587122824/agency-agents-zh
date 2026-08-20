@@ -18,10 +18,11 @@ import { api } from '../api/client'
 import type { DeliveryAttempt, DeliveryWorkspace, EditorActionSequenceEvidence, EditorAsset, EditorBoundaryCandidateReviewSession, EditorContinuityObservation, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from '../api/types'
 import styles from './EditorPrototypePage.module.css'
 
-const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v13'
+const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v14'
 
 interface LocalEditorDraft {
   schema_version: typeof LOCAL_DRAFT_SCHEMA
+  base_snapshot_id: string
   base_timeline_id: string
   base_row_version: number
   items: TimelineItem[]
@@ -70,7 +71,7 @@ interface BoundaryMotionAnalysis {
   right_minus_left_rhythm_slope_percentage_points: number | null
 }
 
-type BoundaryCandidateComparisonOutcome = 'completed' | 'kept_baseline' | 'shortlisted'
+type BoundaryCandidateComparisonOutcome = 'completed' | 'kept_baseline' | 'shortlisted' | 'adopted'
 type BoundaryContinuityCheckOutcome = 'passed' | 'needs_adjustment'
 type BoundaryContinuityObservations = Record<
   string,
@@ -1398,7 +1399,7 @@ function BoundaryPhaseCandidate({
   baselineAnalysis: BoundaryPixelAnalysis | null
   baselineMotionAnalysis: BoundaryMotionAnalysis | null
   measuredMotionAnalysis: BoundaryMotionAnalysis | null
-  comparisonOutcome: 'completed' | 'kept_baseline' | 'shortlisted' | null
+  comparisonOutcome: BoundaryCandidateComparisonOutcome | null
   selected: boolean
   comparePending: boolean
   onSelect: () => void
@@ -1432,16 +1433,22 @@ function BoundaryPhaseCandidate({
         data-outcome={comparisonOutcome}
         aria-label={comparisonOutcome === 'kept_baseline'
           ? `${label} 本次对照选择保留 A`
-          : comparisonOutcome === 'shortlisted' ? `${label} 已暂存 B 待复看` : `${label} 已完整对照 A 到 B`}
+          : comparisonOutcome === 'shortlisted'
+            ? `${label} 已暂存 B 待复看`
+            : comparisonOutcome === 'adopted' ? `${label} 已确认采用 B` : `${label} 已完整对照 A 到 B`}
       >
         <strong>{comparisonOutcome === 'kept_baseline'
           ? '本次已选择保留 A'
-          : comparisonOutcome === 'shortlisted' ? '已暂存 B 待复看' : '已完整对照 A→B'}</strong>
+          : comparisonOutcome === 'shortlisted'
+            ? '已暂存 B 待复看'
+            : comparisonOutcome === 'adopted' ? '已确认采用 B' : '已完整对照 A→B'}</strong>
         <small>{comparisonOutcome === 'kept_baseline'
           ? '人工结果已保存到项目草稿；可再次对照。'
           : comparisonOutcome === 'shortlisted'
             ? '人工短名单已保存到项目草稿；可再次对照。'
-            : '已看完，尚未选择保留或采用。'}</small>
+            : comparisonOutcome === 'adopted'
+              ? '云端新素材已被明确采用并保存到项目草稿。'
+              : '已看完，尚未选择保留或采用。'}</small>
       </span>}
       {measuredMotionAnalysis ? <section className={styles.boundaryPhaseCandidateMeasured} aria-label={`${label} 已实测动作证据`}>
         <strong>已实测动作</strong>
@@ -3482,6 +3489,8 @@ export function EditorPrototypePage() {
     issueLabel: string
   } | null>(null)
   const [shotRevisionRationale, setShotRevisionRationale] = useState('')
+  const [cloudRevisionReviewRequestId, setCloudRevisionReviewRequestId] = useState<string | null>(null)
+  const [cloudRevisionPlayed, setCloudRevisionPlayed] = useState<Record<string, { a: boolean; b: boolean }>>({})
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const monitorRef = useRef<HTMLDivElement | null>(null)
   const timelineViewportRef = useRef<HTMLDivElement | null>(null)
@@ -3511,7 +3520,9 @@ export function EditorPrototypePage() {
   const audioPointerMovedRef = useRef(false)
   const timelineAudioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
 
-  const sourceTimeline = workspace.data?.timelines[0] ?? null
+  const sourceTimeline = workspace.data?.timelines.find(
+    timeline => timeline.id === workspace.data?.current_timeline_id,
+  ) ?? null
   const localDraftKey = `agency-studio.editor-draft.${projectId}`
   const resetProjectIdRef = useRef<string | null>(null)
   const restoredDraftIdentityRef = useRef<string | null>(null)
@@ -3541,6 +3552,8 @@ export function EditorPrototypePage() {
     setBoundaryAssetReplacementTargetId(null)
     setShotRevisionTarget(null)
     setShotRevisionRationale('')
+    setCloudRevisionReviewRequestId(null)
+    setCloudRevisionPlayed({})
     setPendingBoundaryPreviewKey(null)
     setBoundaryRollMonitor(null)
     setBoundaryFrameBlendPercent(50)
@@ -3563,7 +3576,7 @@ export function EditorPrototypePage() {
 
   useEffect(() => {
     if (!sourceTimeline || !workspace.data || serverDraft.isPending) return
-    const restoreIdentity = [projectId, sourceTimeline.id, sourceTimeline.row_version].join(':')
+    const restoreIdentity = [projectId, workspace.data.active_snapshot_id, sourceTimeline.id, sourceTimeline.row_version].join(':')
     if (restoredDraftIdentityRef.current === restoreIdentity) return
     restoredDraftIdentityRef.current = restoreIdentity
     let localRestored: LocalEditorDraft | null = null
@@ -3572,6 +3585,8 @@ export function EditorPrototypePage() {
       const parsed = raw ? JSON.parse(raw) as LocalEditorDraft : null
       if (
         parsed?.schema_version === LOCAL_DRAFT_SCHEMA
+        && parsed.base_snapshot_id === workspace.data.active_snapshot_id
+        && sourceTimeline.snapshot_id === workspace.data.active_snapshot_id
         && parsed.base_timeline_id === sourceTimeline.id
         && parsed.base_row_version === sourceTimeline.row_version
         && Array.isArray(parsed.items)
@@ -3583,6 +3598,8 @@ export function EditorPrototypePage() {
     const remote = serverDraft.data
     const remoteMatches = Boolean(
       remote
+      && remote.snapshot_id === workspace.data.active_snapshot_id
+      && sourceTimeline.snapshot_id === workspace.data.active_snapshot_id
       && remote.base_timeline_id === sourceTimeline.id
       && remote.base_timeline_row_version === sourceTimeline.row_version
     )
@@ -3738,7 +3755,7 @@ export function EditorPrototypePage() {
       : localRestored
         ? `已恢复 ${new Date(localRestored.saved_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 的本地草稿。`
         : '当前时间线已同步；开始调整后会自动保存到项目。')
-  }, [sourceTimeline?.id, sourceTimeline?.row_version, localDraftKey, serverDraft.data, serverDraft.isPending])
+  }, [workspace.data?.active_snapshot_id, sourceTimeline?.id, sourceTimeline?.row_version, localDraftKey, serverDraft.data, serverDraft.isPending])
 
   const durationMs = workspace.data?.duration_ms ?? 15000
   const outputFps = Math.max(1, Number(sourceTimeline?.output_spec.fps) || 24)
@@ -3986,6 +4003,19 @@ export function EditorPrototypePage() {
     )).length,
     [usedMainVideoAssetIds, workspace.data?.available_assets],
   )
+  const pendingCloudRevisionReturn = useMemo(() => (
+    workspace.data?.revision_returns.find(revision => {
+      const sessionKey = `cloud-revision:${revision.request_id}`
+      const sourceKey = `${revision.source_asset.id}->${revision.replacement_asset_id}`
+      return boundaryCandidateReviewSessions[sessionKey]?.comparisonOutcomes[sourceKey] !== 'adopted'
+    }) ?? null
+  ), [boundaryCandidateReviewSessions, workspace.data?.revision_returns])
+  const activeCloudRevisionReturn = cloudRevisionReviewRequestId
+    ? workspace.data?.revision_returns.find(revision => revision.request_id === cloudRevisionReviewRequestId) ?? null
+    : null
+  const activeCloudRevisionReplacement = activeCloudRevisionReturn
+    ? workspace.data?.available_assets.find(asset => asset.id === activeCloudRevisionReturn.replacement_asset_id) ?? null
+    : null
   const selectedGapFormalRecommendations = useMemo(() => {
     if (!selectedItem || selectedItem.track_type !== 'main_video' || selectedItem.asset_id) return []
     const selectedGapIndex = mainItems.findIndex(item => item.id === selectedItem.id)
@@ -4247,7 +4277,9 @@ export function EditorPrototypePage() {
       !== JSON.stringify(canonicalDraftValue(editorTimelineItemContracts(sourceTimeline.items)))
   }, [items, sourceTimeline])
   const currentValidationErrors = itemsDifferFromValidatedTimeline ? [] : validationErrors
-  const primaryEditorTaskLabel = shotOrderIssues.length > 0
+  const primaryEditorTaskLabel = pendingCloudRevisionReturn
+    ? `比较云端新后镜 ${pendingCloudRevisionReturn.shot_code}`
+    : shotOrderIssues.length > 0
     ? `修复 ${shotOrderIssues.length} 处镜头顺序`
     : unresolvedCount > 0
       ? `处理 ${unresolvedCount} 处画面缺口`
@@ -4421,6 +4453,7 @@ export function EditorPrototypePage() {
     if (suppressDraftWritesRef.current || !sourceTimeline || !dirty || !items.length || boundaryRollMonitor?.active) return
     const draft: LocalEditorDraft = {
       schema_version: LOCAL_DRAFT_SCHEMA,
+      base_snapshot_id: sourceTimeline.snapshot_id,
       base_timeline_id: sourceTimeline.id,
       base_row_version: sourceTimeline.row_version,
       items,
@@ -7571,6 +7604,8 @@ export function EditorPrototypePage() {
   const showStatusbar = notice !== DEFAULT_EDITOR_NOTICE || autoSaveDraft.isPending || hasStatusFailure
   const hasSavedProjectDraft = Boolean(
     serverDraft.data
+    && serverDraft.data.snapshot_id === workspace.data?.active_snapshot_id
+    && sourceTimeline?.snapshot_id === workspace.data?.active_snapshot_id
     && serverDraft.data.base_timeline_id === sourceTimeline?.id
     && serverDraft.data.base_timeline_row_version === sourceTimeline?.row_version,
   )
@@ -7610,7 +7645,8 @@ export function EditorPrototypePage() {
         <button title="重做" disabled={!future.length} onClick={redo}><Redo2 /></button>
         {(dirty || hasSavedProjectDraft) && <button title="丢弃自动保存的项目草稿" onClick={() => void discardDraft()}><RotateCcw /></button>}
         <button className={styles.primaryAction} disabled={saveAndValidate.isPending} onClick={() => {
-          if (firstShotOrderIssueBoundaryIndex >= 0) focusShotOrderIssueAt(firstShotOrderIssueBoundaryIndex)
+          if (pendingCloudRevisionReturn) setCloudRevisionReviewRequestId(pendingCloudRevisionReturn.request_id)
+          else if (firstShotOrderIssueBoundaryIndex >= 0) focusShotOrderIssueAt(firstShotOrderIssueBoundaryIndex)
           else if (unresolvedCount > 0) focusFirstUnresolvedGap()
           else if (currentValidationErrors.length > 0) setValidationOpen(true)
           else if (nextUnresolvedBoundaryContinuityReview) {
@@ -9157,6 +9193,38 @@ export function EditorPrototypePage() {
       <div className={styles.modalWarning}><ShieldCheck /><span>本步骤不调用生成 API、不创建 WorkItem，也不产生费用。新分镜确认后仍需完成影响分析和云端费用授权。</span></div>
       {requestShotRevision.error && <div className={styles.modalWarning}><AlertTriangle /><span>{requestShotRevision.error instanceof Error ? requestShotRevision.error.message : '后镜调整请求创建失败，请重试。'}</span></div>}
       <footer><button onClick={() => { setShotRevisionTarget(null); setShotRevisionRationale(''); requestShotRevision.reset() }}>取消</button><button className={styles.confirmButton} disabled={!shotRevisionRationale.trim() || requestShotRevision.isPending} onClick={() => requestShotRevision.mutate()}>{requestShotRevision.isPending ? '正在建立…' : '建立新分镜草案'}</button></footer>
+    </section></div>}
+
+    {activeCloudRevisionReturn && activeCloudRevisionReplacement && <div className={styles.modal} role="dialog" aria-modal="true" aria-label="比较云端新后镜"><section className={styles.shotRevisionModal}>
+      <header><Cloud /><div><span>CLOUD REVISION RETURN</span><h2>比较 {activeCloudRevisionReturn.shot_code} 的旧后镜与云端新后镜</h2></div><button title="关闭" onClick={() => setCloudRevisionReviewRequestId(null)}><X /></button></header>
+      <p>本次只比较真实生产结果。A 是原快照后镜，B 是当前快照已批准的新后镜；两边都开始播放后才能确认。</p>
+      <dl>
+        <div><dt>原调整要求</dt><dd>{activeCloudRevisionReturn.rationale}</dd></div>
+        <div><dt>当前时间线</dt><dd>B 已位于新快照剪辑基线；确认前不会生成新的正式时间线版本。</dd></div>
+      </dl>
+      <div className={styles.cloudRevisionCompare}>
+        <figure><figcaption><strong>A · 原后镜</strong><span>{activeCloudRevisionReturn.source_asset.node_key ?? activeCloudRevisionReturn.source_asset.role}</span></figcaption><video controls preload="metadata" src={`/api/v1/projects/${projectId}/assets/${activeCloudRevisionReturn.source_asset.id}/content`} onPlay={() => setCloudRevisionPlayed(current => ({ ...current, [activeCloudRevisionReturn.request_id]: { a: true, b: current[activeCloudRevisionReturn.request_id]?.b ?? false } }))} /></figure>
+        <figure><figcaption><strong>B · 云端新后镜</strong><span>{activeCloudRevisionReplacement.node_key ?? activeCloudRevisionReplacement.role}</span></figcaption><video controls preload="metadata" src={`/api/v1/projects/${projectId}/assets/${activeCloudRevisionReplacement.id}/content`} onPlay={() => setCloudRevisionPlayed(current => ({ ...current, [activeCloudRevisionReturn.request_id]: { a: current[activeCloudRevisionReturn.request_id]?.a ?? false, b: true } }))} /></figure>
+      </div>
+      <footer><button onClick={() => {
+        const right = mainItems.find(item => item.asset_id === activeCloudRevisionReplacement.id)
+        const rightIndex = right ? mainItems.findIndex(item => item.id === right.id) : -1
+        const left = rightIndex > 0 ? mainItems[rightIndex - 1] : null
+        setCloudRevisionReviewRequestId(null)
+        if (left && right) startBoundaryShotRevision(left, right, '云端新后镜仍未解决衔接问题')
+        else setNotice('新后镜缺少可定位的前后切点，暂不能再次发起后镜调整。')
+      }}>B 仍不合适，再次调整</button><button className={styles.confirmButton} disabled={!cloudRevisionPlayed[activeCloudRevisionReturn.request_id]?.a || !cloudRevisionPlayed[activeCloudRevisionReturn.request_id]?.b} onClick={() => {
+        const sessionKey = `cloud-revision:${activeCloudRevisionReturn.request_id}`
+        const sourceKey = `${activeCloudRevisionReturn.source_asset.id}->${activeCloudRevisionReturn.replacement_asset_id}`
+        rememberBoundaryCandidateComparisonOutcome(sessionKey, sourceKey, 'adopted')
+        const item = mainItems.find(row => row.asset_id === activeCloudRevisionReturn.replacement_asset_id)
+        if (item) {
+          selectItem(item)
+          setPlayheadMs(item.timeline_in_ms)
+        }
+        setCloudRevisionReviewRequestId(null)
+        setNotice(`${activeCloudRevisionReturn.shot_code} 已确认继续使用云端新后镜 B；选择证据已进入项目草稿，请继续复检相邻切点。`)
+      }}>确认使用 B</button></footer>
     </section></div>}
     {versionOpen && <div className={styles.modal} role="dialog" aria-modal="true" aria-label="时间线版本与审计证据"><section className={styles.versionModal}>
       <header><Layers3 /><div><span>VERSION EVIDENCE</span><h2>时间线版本与审计证据</h2></div><button title="关闭" onClick={() => setVersionOpen(false)}><X /></button></header>

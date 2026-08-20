@@ -1448,7 +1448,7 @@ export interface EditorBoundaryMotionAnalysis {
   right_minus_left_rhythm_slope_percentage_points: number | null
 }
 
-export type EditorBoundaryCandidateComparisonOutcome = 'completed' | 'kept_baseline' | 'shortlisted'
+export type EditorBoundaryCandidateComparisonOutcome = 'completed' | 'kept_baseline' | 'shortlisted' | 'adopted'
 
 export interface EditorBoundaryCandidateReviewSession {
   measured_motion_evidence: Record<string, EditorBoundaryMotionAnalysis>
@@ -1464,7 +1464,7 @@ export type EditorContinuityObservationStep =
   | 'sequential_cut_realtime_context'
 
 export interface EditorDraft {
-  schema_version: 'editor-draft-session.v10'
+  schema_version: 'editor-draft-session.v11'
   project_id: string
   snapshot_id: string
   base_timeline_id: string
@@ -1497,6 +1497,7 @@ export interface EditorWorkspace {
   project_title: string
   project_status: string
   active_snapshot_id: string | null
+  current_timeline_id: string | null
   duration_ms: number
   aspect_ratio: string
   audio_mode: string
@@ -1509,6 +1510,15 @@ export interface EditorWorkspace {
     continuity_relation: string
   }>
   available_assets: EditorAsset[]
+  revision_returns: Array<{
+    request_id: string
+    shot_code: string
+    issue_code: string
+    rationale: string
+    source_asset: EditorAsset
+    replacement_asset_id: string
+    current_timeline_item_id: string
+  }>
   timelines: Timeline[]
   latest_editor_run: AgentRun | null
   next_action: { code: string; label: string }

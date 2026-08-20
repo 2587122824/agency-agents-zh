@@ -15,6 +15,7 @@ from ..core.config import RUNTIME_ROOT
 from ..db.models import (
     AgentInputManifest,
     AgentRun,
+    AssetRevisionRequest,
     EditorDraftSession,
     Project,
     ProjectEvent,
@@ -219,7 +220,7 @@ def save_editor_draft(session: Session, project: Project, payload: SaveEditorDra
         )
         repository.add(draft)
     else:
-        draft.schema_version = "editor-draft-session.v10"
+        draft.schema_version = "editor-draft-session.v11"
         draft.snapshot_id = snapshot.id
         draft.base_timeline_id = timeline.id
         draft.base_timeline_row_version = timeline.row_version
@@ -631,7 +632,7 @@ def _create_candidate(
             "TIMELINE_SEQUENCE_DUPLICATE",
             "同一轨道的 sequence_number 必须唯一。",
         )
-    if not supersedes and repository.has_timeline(project.id):
+    if not supersedes and repository.has_timeline(project.id, snapshot.id):
         raise EditorConflictError(
             "TIMELINE_REVISION_REQUIRED",
             "项目已有时间线版本，必须从指定版本创建修订。",
@@ -1036,7 +1037,7 @@ def generate_editor_timeline(
         raise EditorConflictError("EDITOR_STAGE_NOT_READY", "项目必须先完成质量阶段并进入剪辑。")
     snapshot = _require_active_snapshot(session, project, payload.expected_snapshot_id)
     repository = _editor(session)
-    if repository.has_timeline(project.id):
+    if repository.has_timeline(project.id, snapshot.id):
         raise EditorConflictError("TIMELINE_REVISION_REQUIRED", "项目已有时间线，请从现有版本创建人工修订。")
     selection = gateway.select(session, snapshot.production_config_version_id)
     manifest_payload = _editor_manifest(session, project, snapshot)
@@ -2337,21 +2338,78 @@ def editor_workspace(session: Session, project: Project) -> dict:
                 "content_hash": row.content_hash,
             })
     timelines = repository.timeline_history(project.id)
+    current_timeline = next((
+        timeline for timeline in timelines
+        if timeline.snapshot_id == project.active_snapshot_id
+    ), None)
+    revision_returns = []
+    if current_timeline and project.active_snapshot_id:
+        snapshot = repository.snapshot(project.active_snapshot_id)
+        current_items = repository.timeline_items(current_timeline.id)
+        current_item_by_asset_id = {
+            item.asset_id: item for item in current_items if item.asset_id
+        }
+        revision_requests = list(session.scalars(select(AssetRevisionRequest).where(
+            AssetRevisionRequest.project_id == project.id,
+            AssetRevisionRequest.resulting_plan_version_id == (snapshot.plan_version_id if snapshot else ""),
+            AssetRevisionRequest.issue_scope == "storyboard",
+            AssetRevisionRequest.status == "plan_confirmed",
+            AssetRevisionRequest.shot_code.is_not(None),
+        ).order_by(AssetRevisionRequest.created_at.desc())))
+        for request in revision_requests:
+            replacement = next((
+                row for row in assets
+                if row["shot_code"] == request.shot_code and row["id"] in current_item_by_asset_id
+            ), None)
+            source = repository.asset(request.asset_id)
+            if not replacement or not source or source.asset_type != "video" or replacement["asset_type"] != "video":
+                continue
+            source_nodes = repository.dag_nodes_by_ids([source.dag_node_id]) if source.dag_node_id else []
+            source_node = source_nodes[0] if source_nodes else None
+            revision_returns.append({
+                "request_id": request.id,
+                "shot_code": request.shot_code,
+                "issue_code": request.issue_code,
+                "rationale": request.rationale,
+                "source_asset": {
+                    "id": source.id,
+                    "row_version": source.row_version,
+                    "snapshot_id": source.snapshot_id,
+                    "dag_node_id": source.dag_node_id,
+                    "node_key": source_node.node_key if source_node else None,
+                    "shot_code": request.shot_code,
+                    "shot_sequence_number": replacement["shot_sequence_number"],
+                    "asset_type": source.asset_type,
+                    "role": source.role,
+                    "duration_ms": source.duration_ms,
+                    "width": source.width,
+                    "height": source.height,
+                    "state": source.state,
+                    "content_hash": source.content_hash,
+                },
+                "replacement_asset_id": replacement["id"],
+                "current_timeline_item_id": current_item_by_asset_id[replacement["id"]].id,
+            })
     latest_editor_run = repository.latest_editor_run(project.id, project.active_snapshot_id) if project.active_snapshot_id else None
-    if project.status == "quality_review":
+    if not project.active_snapshot_id:
+        next_action = {
+            "code": "CREATE_PRODUCTION_SNAPSHOT",
+            "label": "为新分镜创建生产快照",
+        }
+    elif project.status == "quality_review":
         next_action = {
             "code": "APPROVE_QUALITY_STAGE" if quality["stage_ready"] else "REVIEW_REQUIRED_ASSETS",
             "label": "确认进入剪辑" if quality["stage_ready"] else "先完成必需素材审核",
         }
-    elif not timelines and latest_editor_run and latest_editor_run.status == "failed":
+    elif not current_timeline and latest_editor_run and latest_editor_run.status == "failed":
         next_action = {"code": "RETRY_EDITOR_ASSISTANT", "label": "确认费用并重跑剪辑助理"}
-    elif not timelines:
+    elif not current_timeline:
         next_action = {"code": "GENERATE_EDITOR_TIMELINE", "label": "让剪辑助理生成草案"}
-    elif timelines[0].status == "candidate":
+    elif current_timeline.status == "candidate":
         next_action = {"code": "VALIDATE_TIMELINE", "label": "校验最新时间线候选"}
-    elif timelines[0].status == "review":
+    elif current_timeline.status == "review":
         next_action = {"code": "CONFIRM_TIMELINE", "label": "确认剪辑合同"}
-    elif timelines[0].status == "confirmed":
+    elif current_timeline.status == "confirmed":
         next_action = {"code": "PREPARE_DELIVERY", "label": "剪辑合同已确认，等待交付实现"}
     else:
         next_action = {"code": "REVISE_TIMELINE", "label": "创建新的时间线修订"}
@@ -2360,6 +2418,7 @@ def editor_workspace(session: Session, project: Project) -> dict:
         "project_title": project.title,
         "project_status": project.status,
         "active_snapshot_id": project.active_snapshot_id,
+        "current_timeline_id": current_timeline.id if current_timeline else None,
         "duration_ms": project.duration_seconds * 1000,
         "aspect_ratio": project.aspect_ratio,
         "audio_mode": project.audio_mode,
@@ -2367,6 +2426,7 @@ def editor_workspace(session: Session, project: Project) -> dict:
         "quality_output_gaps": quality["output_gaps"],
         "shot_sequence": shot_rows,
         "available_assets": assets,
+        "revision_returns": revision_returns,
         "timelines": [timeline_read(session, row) for row in timelines],
         "latest_editor_run": _run_dict(latest_editor_run),
         "next_action": next_action,
