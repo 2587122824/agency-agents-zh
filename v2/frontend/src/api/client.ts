@@ -351,7 +351,7 @@ export const api = {
       rationale: '用户撤销已通过结论，素材重新进入人工审核。',
     }),
   }),
-  requestAssetRevision: (projectId: string, asset: ProductionAsset, issueScope: AssetRevisionRequest['issue_scope'], issueCode: AssetRevisionRequest['issue_code'], rationale = '') => request<AssetRevisionResult>(`/projects/${projectId}/assets/${asset.id}:request-revision`, {
+  requestAssetRevision: (projectId: string, asset: Pick<ProductionAsset, 'id' | 'row_version'>, issueScope: AssetRevisionRequest['issue_scope'], issueCode: AssetRevisionRequest['issue_code'], rationale = '') => request<AssetRevisionResult>(`/projects/${projectId}/assets/${asset.id}:request-revision`, {
     method: 'POST', body: JSON.stringify({
       command_id: crypto.randomUUID(), actor_id: 'local-user', expected_asset_row_version: asset.row_version,
       issue_scope: issueScope, issue_code: issueCode, rationale,

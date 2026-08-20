@@ -342,6 +342,7 @@ class TimelineRead(BaseModel):
 
 class EditorAssetRead(BaseModel):
     id: str
+    row_version: int
     snapshot_id: str
     dag_node_id: str | None
     node_key: str | None

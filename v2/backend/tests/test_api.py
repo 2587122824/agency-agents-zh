@@ -6914,6 +6914,7 @@ def test_editor_assistant_creates_auditable_timeline_candidate_for_manual_confir
     )
     assert [asset["shot_code"] for asset in video_workspace_assets] == ["SH-001", "SH-002", "SH-003"]
     assert [asset["shot_sequence_number"] for asset in video_workspace_assets] == [1, 2, 3]
+    assert all(asset["row_version"] >= 1 for asset in video_workspace_assets)
     persisted_timeline = next(item for item in workspace["timelines"] if item["id"] == timeline["id"])
     assert persisted_timeline["source"] == "editor_assistant"
     assert persisted_timeline["items"][0]["transform"]["editor_assistant"]["selection_reason"]

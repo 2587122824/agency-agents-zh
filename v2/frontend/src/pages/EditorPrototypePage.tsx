@@ -12,10 +12,10 @@ import {
   type PointerEvent as ReactPointerEvent,
   type SyntheticEvent as ReactSyntheticEvent,
 } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
-import type { DeliveryAttempt, DeliveryWorkspace, EditorActionSequenceEvidence, EditorBoundaryCandidateReviewSession, EditorContinuityObservation, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from '../api/types'
+import type { DeliveryAttempt, DeliveryWorkspace, EditorActionSequenceEvidence, EditorAsset, EditorBoundaryCandidateReviewSession, EditorContinuityObservation, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from '../api/types'
 import styles from './EditorPrototypePage.module.css'
 
 const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v13'
@@ -1585,6 +1585,8 @@ function BoundaryActionComparison({
   onReplaceLeftAsset,
   onReplaceRightAsset,
   replacementCandidateCount,
+  shotRevisionAvailable,
+  onRequestShotRevision,
   formalOrderSwapAvailable,
   onSwapToFormalOrder,
   onAdjustStructure,
@@ -1619,6 +1621,8 @@ function BoundaryActionComparison({
   onReplaceLeftAsset: () => void
   onReplaceRightAsset: () => void
   replacementCandidateCount: number
+  shotRevisionAvailable: boolean
+  onRequestShotRevision: (issueLabel: string) => void
   formalOrderSwapAvailable: boolean
   onSwapToFormalOrder: () => void
   onAdjustStructure: () => void
@@ -2647,10 +2651,10 @@ function BoundaryActionComparison({
     </header>
     <section className={styles.boundaryPrimaryTask} aria-label={`当前${guidedReviewMode === 'sequence' ? '切点节奏' : '同步动作'}任务`}>
       <span>
-        <strong>{phaseDecisionReady ? '对照已完成，请选择结果' : hasComparisonTrial ? 'B 已准备，下一步完成 A→B 对照' : sequenceRepairGuided && sequencePrimaryTrialKept ? replacementCandidateCount > 0 ? '推荐节奏已排除，改用替代素材' : '推荐节奏已排除，调整镜头结构' : sequenceRepairGuided ? `先试一个节奏方案：${guidedIssueLabel}` : guidedIssueLabel ? `完成两次观看：${guidedIssueLabel}` : '先检查最接近切点的邻帧'}</strong>
+        <strong>{phaseDecisionReady ? '对照已完成，请选择结果' : hasComparisonTrial ? 'B 已准备，下一步完成 A→B 对照' : sequenceRepairGuided && sequencePrimaryTrialKept ? replacementCandidateCount > 0 ? '推荐节奏已排除，改用替代素材' : shotRevisionAvailable ? '推荐节奏已排除，发起后镜调整' : '推荐节奏已排除，调整镜头结构' : sequenceRepairGuided ? `先试一个节奏方案：${guidedIssueLabel}` : guidedIssueLabel ? `完成两次观看：${guidedIssueLabel}` : '先检查最接近切点的邻帧'}</strong>
         <small>{phaseCandidateScanSide
           ? `${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}已对照 ${reviewedPhaseCandidateCount}/${nearbyPhaseCandidates.length}${undecidedPhaseCandidateCount ? ` · 待决定 ${undecidedPhaseCandidateCount}` : ''}`
-          : hasComparisonTrial ? tunedTrialSummary : sequenceRepairGuided && sequencePrimaryTrialKept ? replacementCandidateCount > 0 ? `这项 B 已完整对照并保留 A；当前有 ${replacementCandidateCount} 个未使用已批准视频，下一步只为后镜选择替代素材。` : '这项 B 已完整对照并保留 A；当前没有未使用已批准视频。现有精确重试只服务失败任务，新镜头必须回生产流程建立新合同。' : sequenceRepairGuided ? `${sequencePrimaryTrial.reason}；B 只在本地试用，不写草稿。` : guidedIssueLabel ? '先并排看动作阶段，再按真实顺序看完整切点；两次都只记录观看证据，不修改时间线。' : '只在你打开后加载候选；系统不排序、不推荐，也不会自动设置 B。'}</small>
+          : hasComparisonTrial ? tunedTrialSummary : sequenceRepairGuided && sequencePrimaryTrialKept ? replacementCandidateCount > 0 ? `这项 B 已完整对照并保留 A；当前有 ${replacementCandidateCount} 个未使用已批准视频，下一步只为后镜选择替代素材。` : shotRevisionAvailable ? '当前没有未使用已批准视频；可为后镜建立新分镜草案，确认方案与费用后再由云端 API 生成，当前时间线保持不变。' : '当前没有未使用已批准视频，且后镜缺少可追溯的分镜生产合同；请先调整时间线结构。' : sequenceRepairGuided ? `${sequencePrimaryTrial.reason}；B 只在本地试用，不写草稿。` : guidedIssueLabel ? '先并排看动作阶段，再按真实顺序看完整切点；两次都只记录观看证据，不修改时间线。' : '只在你打开后加载候选；系统不排序、不推荐，也不会自动设置 B。'}</small>
       </span>
       {sequenceRepairGuided && !sequencePrimaryTrialKept && !hasComparisonTrial && !phaseDecisionReady && <button
         type="button"
@@ -2664,9 +2668,11 @@ function BoundaryActionComparison({
           ? '画面轨已锁定，不能调整片段、素材或镜头结构。'
           : replacementCandidateCount > 0
           ? `只显示 ${replacementCandidateCount} 个未用于主画面的已批准视频，点击后才替换后镜`
+          : shotRevisionAvailable
+          ? '建立新的后镜分镜草案；本步骤不调用云端生成或产生费用'
           : '退出切点节奏试调，回到当前片段调整镜头结构'}
-        onClick={replacementCandidateCount > 0 ? onReplaceRightAsset : onAdjustStructure}
-      >{replacementCandidateCount > 0 ? '为后镜选择替代素材' : '调整镜头结构'}</button>}
+        onClick={replacementCandidateCount > 0 ? onReplaceRightAsset : shotRevisionAvailable ? () => onRequestShotRevision(guidedIssueLabel ?? '切点节奏需要调整') : onAdjustStructure}
+      >{replacementCandidateCount > 0 ? '为后镜选择替代素材' : shotRevisionAvailable ? '发起后镜调整' : '调整镜头结构'}</button>}
       {guidedIssueLabel && guidedReviewMode !== 'sequence' && !hasComparisonTrial && !phaseDecisionReady && <div className={styles.boundaryPrimaryTaskActions}>
         <button type="button" disabled={comparisonDurationMs <= 0} onClick={playing ? pauseMedia : startComparison}>{playing ? '暂停同步播放' : progressMs > 0 ? '重播同步动作' : '同步播放动作'}</button>
         <button type="button" disabled={sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady} onClick={sequencePlaying && phaseSequenceCompareStage === 'idle' ? pauseSequenceMedia : startSequencePreview}>{sequencePlaying && phaseSequenceCompareStage === 'idle' ? '暂停顺序试播' : sequenceProgressMs > 0 ? '重播顺序切点' : '顺序试播切点'}</button>
@@ -3243,6 +3249,7 @@ function SubtitleCueStrip({ projectId, item }: { projectId: string; item: Timeli
 export function EditorPrototypePage() {
   const [params, setParams] = useSearchParams()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const projects = useQuery({
     queryKey: ['projects'],
     queryFn: () => api.projects(),
@@ -3468,6 +3475,13 @@ export function EditorPrototypePage() {
   const [deliveryStatusOpen, setDeliveryStatusOpen] = useState(false)
   const [deliveryMethod, setDeliveryMethod] = useState<'external_upload' | 'local_ffmpeg' | null>(null)
   const [deliveryFile, setDeliveryFile] = useState<File | null>(null)
+  const [shotRevisionTarget, setShotRevisionTarget] = useState<{
+    asset: EditorAsset
+    leftLabel: string
+    rightLabel: string
+    issueLabel: string
+  } | null>(null)
+  const [shotRevisionRationale, setShotRevisionRationale] = useState('')
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const monitorRef = useRef<HTMLDivElement | null>(null)
   const timelineViewportRef = useRef<HTMLDivElement | null>(null)
@@ -3525,6 +3539,8 @@ export function EditorPrototypePage() {
     setContinuityQueueActive(false)
     setBoundaryCandidateGuidanceRequest(null)
     setBoundaryAssetReplacementTargetId(null)
+    setShotRevisionTarget(null)
+    setShotRevisionRationale('')
     setPendingBoundaryPreviewKey(null)
     setBoundaryRollMonitor(null)
     setBoundaryFrameBlendPercent(50)
@@ -4772,6 +4788,26 @@ export function EditorPrototypePage() {
     },
   })
 
+  const requestShotRevision = useMutation({
+    mutationFn: async () => {
+      if (!shotRevisionTarget) throw new Error('当前没有待调整的后镜。')
+      const rationale = shotRevisionRationale.trim()
+      if (!rationale) throw new Error('请说明后镜需要解决的衔接问题。')
+      return api.requestAssetRevision(
+        projectId,
+        shotRevisionTarget.asset,
+        'storyboard',
+        'content_mismatch',
+        rationale,
+      )
+    },
+    onSuccess: result => {
+      setShotRevisionTarget(null)
+      setShotRevisionRationale('')
+      navigate(result.next_action.path)
+    },
+  })
+
   const discardDraft = async () => {
     if (!sourceTimeline) return
     try {
@@ -4817,6 +4853,8 @@ export function EditorPrototypePage() {
     setGapAssetSelection(false)
     setAssetSearchOpen(false)
     setAssetSearchQuery('')
+    setShotRevisionTarget(null)
+    setShotRevisionRationale('')
     setPendingBoundaryPreviewKey(null)
     setNotice('已丢弃自动保存的项目草稿，恢复到当前时间线版本。')
   }
@@ -5768,6 +5806,20 @@ export function EditorPrototypePage() {
     setNotice(availableCount
       ? `素材箱已进入${sideLabel}替换：只显示 ${availableCount} 个未用于主画面的已批准视频；点击素材后才替换 ${target.label} 并自动复检新切点。`
       : `当前没有未使用的已批准视频可替换${sideLabel} ${target.label}；请返回生产流程生成补充镜头，或调整现有镜头结构。`)
+  }
+
+  const startBoundaryShotRevision = (left: TimelineItem, right: TimelineItem, issueLabel: string) => {
+    if (blockMainTrackEdit(right)) return
+    const asset = workspace.data?.available_assets.find(candidate => candidate.id === right.asset_id) ?? null
+    if (!asset?.shot_code || !asset.dag_node_id) {
+      setNotice(`${right.label} 缺少可追溯的分镜生产合同，不能从剪辑台建立新版本；请先调整时间线结构。`)
+      return
+    }
+    requestShotRevision.reset()
+    setShotRevisionTarget({ asset, leftLabel: left.label, rightLabel: right.label, issueLabel })
+    setShotRevisionRationale(
+      `${left.label} → ${right.label} 的“${issueLabel}”无法通过现有切点节奏或已批准替代素材解决；请调整后镜 ${asset.shot_code} 的内容与动作，使跳转意图清楚并保持主体连续。`,
+    )
   }
 
   const extendPrecedingItemIntoSelectedGap = () => {
@@ -7103,7 +7155,8 @@ export function EditorPrototypePage() {
     window.addEventListener('pointercancel', onCancel)
   }
 
-  const overlayOpen = versionOpen
+  const overlayOpen = Boolean(shotRevisionTarget)
+    || versionOpen
     || confirmSaveOpen
     || validationOpen
     || previewOpen
@@ -7111,7 +7164,12 @@ export function EditorPrototypePage() {
     || deliveryStatusOpen
 
   const closeTopOverlay = () => {
-    if (deliveryStatusOpen) setDeliveryStatusOpen(false)
+    if (shotRevisionTarget) {
+      setShotRevisionTarget(null)
+      setShotRevisionRationale('')
+      requestShotRevision.reset()
+    }
+    else if (deliveryStatusOpen) setDeliveryStatusOpen(false)
     else if (deliveryAuthorizeOpen) setDeliveryAuthorizeOpen(false)
     else if (previewOpen) setPreviewOpen(false)
     else if (validationOpen) setValidationOpen(false)
@@ -8439,6 +8497,10 @@ export function EditorPrototypePage() {
                          onReplaceLeftAsset={() => startBoundaryAssetReplacement(left, '前镜')}
                          onReplaceRightAsset={() => startBoundaryAssetReplacement(right, '后镜')}
                          replacementCandidateCount={unusedApprovedVideoAssetCount}
+                         shotRevisionAvailable={Boolean(workspace.data?.available_assets.some(asset => (
+                           asset.id === right.asset_id && asset.shot_code && asset.dag_node_id
+                         )))}
+                         onRequestShotRevision={issueLabel => startBoundaryShotRevision(left, right, issueLabel)}
                          formalOrderSwapAvailable={orderWarning}
                          onSwapToFormalOrder={() => swapBoundaryToFormalOrder(left, right)}
                          onAdjustStructure={() => {
@@ -9082,6 +9144,20 @@ export function EditorPrototypePage() {
       </div>
       <footer><span><Sparkles />AI 初剪依据和版本证据已收进右侧抽屉</span><span>拖动时间尺寻帧 · ←/→ 逐帧 · [ / ] 巡检 · , / . 修剪切点 · \ 适应 · Space 播放</span></footer>
     </section>
+    {shotRevisionTarget && <div className={styles.modal} role="dialog" aria-modal="true" aria-label="发起后镜分镜调整"><section className={styles.shotRevisionModal}>
+      <header><Cloud /><div><span>CLOUD REVISION PATH</span><h2>为 {shotRevisionTarget.asset.shot_code} 建立新分镜版本</h2></div><button title="关闭" onClick={() => { setShotRevisionTarget(null); setShotRevisionRationale(''); requestShotRevision.reset() }}><X /></button></header>
+      <p>当前没有可直接替换的已批准视频。这里先建立可审计的后镜调整草案；确认新分镜和生产影响后，系统才会单独请求费用授权并调用云端 API。</p>
+      <dl>
+        <div><dt>当前切点</dt><dd>{shotRevisionTarget.leftLabel} → {shotRevisionTarget.rightLabel}</dd></div>
+        <div><dt>目标后镜</dt><dd>{shotRevisionTarget.asset.shot_code}</dd></div>
+        <div><dt>待解决问题</dt><dd>{shotRevisionTarget.issueLabel}</dd></div>
+        <div><dt>当前时间线</dt><dd>保持不变</dd></div>
+      </dl>
+      <label className={styles.shotRevisionReason}>调整要求<textarea autoFocus maxLength={2000} value={shotRevisionRationale} onChange={event => setShotRevisionRationale(event.target.value)} /></label>
+      <div className={styles.modalWarning}><ShieldCheck /><span>本步骤不调用生成 API、不创建 WorkItem，也不产生费用。新分镜确认后仍需完成影响分析和云端费用授权。</span></div>
+      {requestShotRevision.error && <div className={styles.modalWarning}><AlertTriangle /><span>{requestShotRevision.error instanceof Error ? requestShotRevision.error.message : '后镜调整请求创建失败，请重试。'}</span></div>}
+      <footer><button onClick={() => { setShotRevisionTarget(null); setShotRevisionRationale(''); requestShotRevision.reset() }}>取消</button><button className={styles.confirmButton} disabled={!shotRevisionRationale.trim() || requestShotRevision.isPending} onClick={() => requestShotRevision.mutate()}>{requestShotRevision.isPending ? '正在建立…' : '建立新分镜草案'}</button></footer>
+    </section></div>}
     {versionOpen && <div className={styles.modal} role="dialog" aria-modal="true" aria-label="时间线版本与审计证据"><section className={styles.versionModal}>
       <header><Layers3 /><div><span>VERSION EVIDENCE</span><h2>时间线版本与审计证据</h2></div><button title="关闭" onClick={() => setVersionOpen(false)}><X /></button></header>
       <p>版本按新到旧排列。项目草稿随时自动保存；只有生成可导出版本时才冻结新合同，历史版本和历次成片都不会被覆盖。</p>

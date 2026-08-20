@@ -2731,6 +2731,29 @@
 }
 .modal > section > footer .confirmButton { border-color: var(--editor-accent); background: var(--editor-accent); color: #fff; font-weight: 800; }
 .modal > section > footer button:disabled { opacity: .5; cursor: default; }
+.shotRevisionModal { width: min(560px, 100%) !important; }
+.shotRevisionReason {
+  margin: 0 18px 14px;
+  display: grid;
+  gap: 6px;
+  color: #aab2b5;
+  font-size: 9px;
+  font-weight: 700;
+}
+.shotRevisionReason textarea {
+  min-height: 96px;
+  padding: 10px;
+  resize: vertical;
+  border: 1px solid #41484c;
+  border-radius: 5px;
+  outline: none;
+  background: #15191b;
+  color: #edf0ee;
+  font: inherit;
+  font-weight: 500;
+  line-height: 1.6;
+}
+.shotRevisionReason textarea:focus { border-color: var(--editor-accent); }
 .validationList {
   max-height: 340px;
   overflow-y: auto;

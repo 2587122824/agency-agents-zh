@@ -2322,6 +2322,7 @@ def editor_workspace(session: Session, project: Project) -> dict:
             shot = shots_by_id.get(node.shot_id) if node and node.shot_id else None
             assets.append({
                 "id": row.id,
+                "row_version": row.row_version,
                 "snapshot_id": row.snapshot_id,
                 "dag_node_id": row.dag_node_id,
                 "node_key": node.node_key if node else None,

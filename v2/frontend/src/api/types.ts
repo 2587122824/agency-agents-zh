@@ -1238,6 +1238,7 @@ export interface CosyVoiceValidationWorkspace {
 
 export interface EditorAsset {
   id: string
+  row_version: number
   snapshot_id: string
   dag_node_id: string | null
   node_key: string | null
