@@ -430,7 +430,19 @@ function analyzeFrameMotion(firstVideo: HTMLVideoElement, secondVideo: HTMLVideo
 
 type ContinuityRelation = 'same_moment' | 'time_jump' | 'location_change' | 'outfit_change'
 type BoundaryContinuityReviewMode = 'frames' | 'overlay' | 'action' | 'sequence'
+type SequenceContinuityCheckId = 'jump-readable' | 'location-readable' | 'outfit-readable'
 const DEFAULT_EDITOR_NOTICE = '当前时间线已同步；开始调整后会自动保存到项目。'
+
+const SEQUENCE_TRANSITION_RECOMMENDATIONS: Record<SequenceContinuityCheckId, { durationMs: number; reason: string }> = {
+  'jump-readable': { durationMs: 200, reason: '用短黑场标出时间略过，同时保持节奏紧凑' },
+  'location-readable': { durationMs: 300, reason: '给场景切换留下辨认间隔，避免误读为同一空间' },
+  'outfit-readable': { durationMs: 500, reason: '用更明确的段落停顿提示换装发生在叙事间隔中' },
+}
+
+function sequenceTransitionRecommendation(checkId: string | null) {
+  return SEQUENCE_TRANSITION_RECOMMENDATIONS[checkId as SequenceContinuityCheckId]
+    ?? SEQUENCE_TRANSITION_RECOMMENDATIONS['jump-readable']
+}
 
 const CONTINUITY_RELATION_COPY: Record<ContinuityRelation, { label: string; tone: 'locked' | 'change'; summary: string }> = {
   same_moment: { label: '同一时刻', tone: 'locked', summary: '重点核对主体、动作阶段和运动方向是否连续。' },
@@ -1598,7 +1610,7 @@ function BoundaryActionComparison({
   onApplyPhasePair: (leftDeltaMs: number, rightDeltaMs: number) => void
   candidateReviewSessionKey: string
   candidateReviewSession: BoundaryCandidateReviewSession
-  guidedScanRequest: { requestToken: number; issueLabel: string; intent: 'observe' | 'issue' | 'resume'; reviewMode: BoundaryContinuityReviewMode } | null
+  guidedScanRequest: { requestToken: number; checkId: string; issueLabel: string; intent: 'observe' | 'issue' | 'resume'; reviewMode: BoundaryContinuityReviewMode } | null
   onConsumeGuidedScanRequest: (requestToken: number) => void
   onRememberCandidateMotionEvidence: (sessionKey: string, sourceKey: string, analysis: BoundaryMotionAnalysis) => void
   onRememberCandidateComparisonOutcome: (sessionKey: string, sourceKey: string, outcome: BoundaryCandidateComparisonOutcome) => void
@@ -1648,6 +1660,7 @@ function BoundaryActionComparison({
   const alternativeOutcomes = candidateReviewSession.alternativeOutcomes
   const [phaseCandidateScanSide, setPhaseCandidateScanSide] = useState<'left' | 'right' | null>(null)
   const [phaseCandidateScanExpanded, setPhaseCandidateScanExpanded] = useState(false)
+  const [guidedCheckId, setGuidedCheckId] = useState<string | null>(null)
   const [guidedIssueLabel, setGuidedIssueLabel] = useState<string | null>(null)
   const [guidedReviewMode, setGuidedReviewMode] = useState<BoundaryContinuityReviewMode | null>(null)
   const [guidedIntent, setGuidedIntent] = useState<'observe' | 'issue' | 'resume' | null>(null)
@@ -1945,12 +1958,20 @@ function BoundaryActionComparison({
     Math.floor((left.timeline_out_ms - left.timeline_in_ms) / 2),
     Math.floor((right.timeline_out_ms - right.timeline_in_ms) / 2),
   )
-  const sequencePrimaryTrial = baselinePairedFade
-    ? { type: 'cut' as const, durationMs: 0, label: '试用直接切换' }
+  const sequenceTransitionRecommendationCopy = sequenceTransitionRecommendation(guidedCheckId)
+  const sequenceRecommendedFadeDurationMs = Math.min(
+    sequenceTransitionRecommendationCopy.durationMs,
+    transitionMaximumDurationMs,
+  )
+  const baselineMatchesSequenceRecommendation = baselinePairedFade
+    && baselineTransitionOut?.duration_ms === sequenceRecommendedFadeDurationMs
+  const sequencePrimaryTrial = baselineMatchesSequenceRecommendation
+    ? { type: 'cut' as const, durationMs: 0, label: '试用直接切换', reason: '当前已是推荐停顿；用直接切换对照是否更自然' }
     : {
       type: 'fade' as const,
-      durationMs: Math.min(200, transitionMaximumDurationMs),
-      label: `试用 ${seconds(Math.min(200, transitionMaximumDurationMs))} 淡出淡入`,
+      durationMs: sequenceRecommendedFadeDurationMs,
+      label: `试用 ${seconds(sequenceRecommendedFadeDurationMs)} 淡出淡入`,
+      reason: sequenceTransitionRecommendationCopy.reason,
     }
   const sequenceRepairGuided = guidedIntent === 'issue' && guidedReviewMode === 'sequence'
   const exhaustedCandidateTransitionTrial = baselinePairedCut && transitionMaximumDurationMs >= 100
@@ -2054,6 +2075,7 @@ function BoundaryActionComparison({
   useEffect(() => {
     if (!guidedScanRequest) return
     setGuidedIntent(guidedScanRequest.intent)
+    setGuidedCheckId(guidedScanRequest.checkId)
     if (guidedScanRequest.intent === 'observe') {
       setGuidedIssueLabel(guidedScanRequest.issueLabel)
       setGuidedReviewMode(guidedScanRequest.reviewMode)
@@ -2072,7 +2094,7 @@ function BoundaryActionComparison({
       setAdvancedTrialsOpen(false)
       onNotice(
         `正在处理“${guidedScanRequest.issueLabel}”；`
-        + '先无损试用一个轻转场，再按真实顺序对照 A/B，不扫描动作候选。',
+        + '先无损试用与当前叙事变化匹配的转场，再按真实顺序对照 A/B，不扫描动作候选。',
       )
       onConsumeGuidedScanRequest(guidedScanRequest.requestToken)
       return
@@ -2624,7 +2646,7 @@ function BoundaryActionComparison({
         <strong>{phaseDecisionReady ? '对照已完成，请选择结果' : hasComparisonTrial ? 'B 已准备，下一步完成 A→B 对照' : sequenceRepairGuided ? `先试一个节奏方案：${guidedIssueLabel}` : guidedIssueLabel ? `完成两次观看：${guidedIssueLabel}` : '先检查最接近切点的邻帧'}</strong>
         <small>{phaseCandidateScanSide
           ? `${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}已对照 ${reviewedPhaseCandidateCount}/${nearbyPhaseCandidates.length}${undecidedPhaseCandidateCount ? ` · 待决定 ${undecidedPhaseCandidateCount}` : ''}`
-          : hasComparisonTrial ? tunedTrialSummary : sequenceRepairGuided ? 'B 只在本地试用，不写草稿；随后按真实顺序比较 A/B。' : guidedIssueLabel ? '先并排看动作阶段，再按真实顺序看完整切点；两次都只记录观看证据，不修改时间线。' : '只在你打开后加载候选；系统不排序、不推荐，也不会自动设置 B。'}</small>
+          : hasComparisonTrial ? tunedTrialSummary : sequenceRepairGuided ? `${sequencePrimaryTrial.reason}；B 只在本地试用，不写草稿。` : guidedIssueLabel ? '先并排看动作阶段，再按真实顺序看完整切点；两次都只记录观看证据，不修改时间线。' : '只在你打开后加载候选；系统不排序、不推荐，也不会自动设置 B。'}</small>
       </span>
       {sequenceRepairGuided && !hasComparisonTrial && !phaseDecisionReady && <button
         type="button"
@@ -8363,6 +8385,7 @@ export function EditorPrototypePage() {
                          guidedScanRequest={boundaryCandidateGuidanceRequest?.boundaryKey === boundaryKey
                            ? {
                              requestToken: boundaryCandidateGuidanceRequest.requestToken,
+                             checkId: boundaryCandidateGuidanceRequest.checkId,
                              issueLabel: boundaryCandidateGuidanceRequest.checkLabel,
                              intent: boundaryCandidateGuidanceRequest.intent,
                              reviewMode: boundaryCandidateGuidanceRequest.reviewMode,
